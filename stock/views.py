@@ -1,0 +1,126 @@
+from rest_framework import generics, status
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from django.shortcuts import get_object_or_404
+from django.db import transaction
+from users.permissions import IsInventoryStaffOrAdmin
+from inventory.models import Product
+from .models import StockTransaction
+from .serializers import StockTransactionSerializer, StockAdjustmentSerializer
+
+
+class StockTransactionListView(generics.ListAPIView):
+    """List all stock transactions"""
+    queryset = StockTransaction.objects.select_related('product', 'performed_by').all()
+    serializer_class = StockTransactionSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        
+        # Filter by product
+        product_id = self.request.query_params.get('product', None)
+        if product_id:
+            queryset = queryset.filter(product_id=product_id)
+        
+        # Filter by transaction type
+        transaction_type = self.request.query_params.get('type', None)
+        if transaction_type:
+            queryset = queryset.filter(transaction_type=transaction_type.upper())
+        
+        # Filter by date range
+        start_date = self.request.query_params.get('start_date', None)
+        end_date = self.request.query_params.get('end_date', None)
+        
+        if start_date:
+            queryset = queryset.filter(created_at__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(created_at__lte=end_date)
+        
+        return queryset
+
+
+class StockTransactionDetailView(generics.RetrieveAPIView):
+    """Retrieve a stock transaction"""
+    queryset = StockTransaction.objects.select_related('product', 'performed_by').all()
+    serializer_class = StockTransactionSerializer
+    permission_classes = [IsAuthenticated]
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsInventoryStaffOrAdmin])
+def stock_adjustment(request):
+    """Manually adjust stock (IN/OUT for damaged, lost, reconciliation, etc.)"""
+    serializer = StockAdjustmentSerializer(data=request.data)
+    
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    data = serializer.validated_data
+    
+    with transaction.atomic():
+        # Get product (by ID or barcode)
+        if 'barcode' in data and data['barcode']:
+            try:
+                product = Product.objects.get(barcode=data['barcode'])
+            except Product.DoesNotExist:
+                return Response(
+                    {'error': 'Product not found with this barcode'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        else:
+            product = get_object_or_404(Product, id=data['product_id'])
+        
+        quantity = data['quantity']
+        adjustment_type = data['adjustment_type']
+        
+        # Check if we have enough stock for OUT adjustments
+        if adjustment_type == 'OUT' and product.current_stock < quantity:
+            return Response(
+                {'error': f'Insufficient stock. Available: {product.current_stock}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Update product stock
+        quantity_before = product.current_stock
+        
+        if adjustment_type == 'IN':
+            product.current_stock += quantity
+        else:  # OUT
+            product.current_stock -= quantity
+        
+        product.save()
+        
+        # Create stock transaction
+        stock_transaction = StockTransaction.objects.create(
+            product=product,
+            transaction_type=adjustment_type,
+            reason=data['reason'],
+            quantity=quantity,
+            quantity_before=quantity_before,
+            quantity_after=product.current_stock,
+            notes=data.get('notes', ''),
+            performed_by=request.user
+        )
+    
+    return Response({
+        'message': 'Stock adjusted successfully',
+        'transaction': StockTransactionSerializer(stock_transaction).data
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def low_stock_products(request):
+    """Get products with stock below minimum level"""
+    from inventory.serializers import ProductSerializer
+    
+    products = Product.objects.select_related('category').all()
+    low_stock = [p for p in products if p.is_low_stock and p.is_active]
+    
+    serializer = ProductSerializer(low_stock, many=True)
+    return Response({
+        'count': len(low_stock),
+        'products': serializer.data
+    })
