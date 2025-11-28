@@ -268,6 +268,8 @@ def weekly_sales_report(request):
 @permission_classes([IsAuthenticated])
 def monthly_revenue_report(request):
     """Get monthly revenue analysis"""
+    from sales.models import SaleItem
+    
     today = timezone.now().date()
     months_data = []
     
@@ -294,22 +296,43 @@ def monthly_revenue_report(request):
             count=Count('id')
         )
         
+        # Calculate cost from sale items
+        monthly_cost = SaleItem.objects.filter(
+            sale__created_at__date__gte=month_start,
+            sale__created_at__date__lte=month_end
+        ).aggregate(
+            total_cost=Sum(F('quantity') * F('product__cost_price'))
+        )
+        
+        revenue = float(monthly['total'] or 0)
+        cost = float(monthly_cost['total_cost'] or 0)
+        gross_income = revenue - cost
+        
         months_data.insert(0, {
             'month': month_start.strftime('%B %Y'),
             'month_short': month_start.strftime('%b'),
             'year': year,
-            'total_revenue': float(monthly['total'] or 0),
+            'total_revenue': revenue,
+            'total_cost': cost,
+            'gross_income': gross_income,
+            'profit_margin': round((gross_income / revenue * 100), 2) if revenue > 0 else 0,
             'transaction_count': monthly['count'] or 0
         })
     
     total_revenue = sum(m['total_revenue'] for m in months_data)
+    total_cost = sum(m['total_cost'] for m in months_data)
+    total_gross_income = sum(m['gross_income'] for m in months_data)
     
     return Response({
         'report_type': 'Monthly Revenue Analysis',
         'period': f'{months_data[0]["month"]} - {months_data[-1]["month"]}',
         'summary': {
             'total_revenue': total_revenue,
+            'total_cost': total_cost,
+            'total_gross_income': total_gross_income,
+            'overall_profit_margin': round((total_gross_income / total_revenue * 100), 2) if total_revenue > 0 else 0,
             'average_monthly_revenue': total_revenue / 12,
+            'average_monthly_gross_income': total_gross_income / 12,
             'best_month': max(months_data, key=lambda x: x['total_revenue'])['month'],
             'best_month_revenue': max(m['total_revenue'] for m in months_data)
         },
