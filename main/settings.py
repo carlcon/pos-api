@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     'inventory',
     'sales',
     'stock',
+    'dashboard',
 ]
 
 # Custom User Model
@@ -99,6 +100,14 @@ DATABASES = {
         'PORT': config('DB_PORT', default='5432'),
     }
 }
+
+# Use SQLite for testing (in-memory for speed)
+import sys
+if 'test' in sys.argv or 'pytest' in sys.modules:
+    DATABASES['default'] = {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'test_db.sqlite3',
+    }
 
 
 # Password validation
