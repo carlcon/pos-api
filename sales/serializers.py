@@ -47,6 +47,10 @@ class SaleCreateSerializer(serializers.ModelSerializer):
             'sale_number', 'customer_name', 'payment_method',
             'subtotal', 'discount', 'notes', 'items'
         ]
+        extra_kwargs = {
+            'sale_number': {'required': False},
+            'subtotal': {'required': False},
+        }
     
     def validate(self, data):
         """Validate that items list is not empty"""
@@ -58,9 +62,16 @@ class SaleCreateSerializer(serializers.ModelSerializer):
         from inventory.models import Product
         from stock.models import StockTransaction
         from django.db import transaction
+        from django.utils import timezone
+        import uuid
         
         items_data = validated_data.pop('items')
         validated_data['cashier'] = self.context['request'].user
+        
+        # Auto-generate sale_number if not provided
+        if not validated_data.get('sale_number'):
+            timestamp = timezone.now().strftime('%Y%m%d%H%M%S')
+            validated_data['sale_number'] = f"SALE-{timestamp}-{str(uuid.uuid4())[:4].upper()}"
         
         with transaction.atomic():
             # Calculate totals

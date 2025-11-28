@@ -51,7 +51,7 @@ class StockTransactionDetailView(generics.RetrieveAPIView):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated, IsInventoryStaffOrAdmin])
 def stock_adjustment(request):
-    """Manually adjust stock (IN/OUT for damaged, lost, reconciliation, etc.)"""
+    """Manually adjust stock (IN/OUT/ADJUSTMENT for damaged, lost, reconciliation, etc.)"""
     serializer = StockAdjustmentSerializer(data=request.data)
     
     if not serializer.is_valid():
@@ -87,8 +87,10 @@ def stock_adjustment(request):
         
         if adjustment_type == 'IN':
             product.current_stock += quantity
-        else:  # OUT
+        elif adjustment_type == 'OUT':
             product.current_stock -= quantity
+        else:  # ADJUSTMENT - set to exact quantity
+            product.current_stock = quantity
         
         product.save()
         
@@ -100,6 +102,7 @@ def stock_adjustment(request):
             quantity=quantity,
             quantity_before=quantity_before,
             quantity_after=product.current_stock,
+            reference_number=data.get('reference_number', ''),
             notes=data.get('notes', ''),
             performed_by=request.user
         )

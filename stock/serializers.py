@@ -25,9 +25,10 @@ class StockAdjustmentSerializer(serializers.Serializer):
     """Serializer for manual stock adjustments"""
     product_id = serializers.IntegerField()
     barcode = serializers.CharField(required=False, allow_blank=True)
-    adjustment_type = serializers.ChoiceField(choices=['IN', 'OUT'])
+    adjustment_type = serializers.ChoiceField(choices=['IN', 'OUT', 'ADJUSTMENT'])
     quantity = serializers.IntegerField(min_value=1)
     reason = serializers.ChoiceField(
-        choices=['DAMAGED', 'LOST', 'RECONCILIATION', 'RETURN', 'MANUAL']
+        choices=['PURCHASE', 'SALE', 'DAMAGED', 'LOST', 'RECONCILIATION', 'RETURN', 'MANUAL']
     )
+    reference_number = serializers.CharField(required=False, allow_blank=True)
     notes = serializers.CharField(required=False, allow_blank=True)
