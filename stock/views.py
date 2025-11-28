@@ -4,10 +4,15 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db import transaction
+from decimal import Decimal
 from users.permissions import IsInventoryStaffOrAdmin
 from inventory.models import Product
-from .models import StockTransaction
-from .serializers import StockTransactionSerializer, StockAdjustmentSerializer
+from .models import StockTransaction, ProductCostHistory
+from .serializers import (
+    StockTransactionSerializer,
+    StockAdjustmentSerializer,
+    ProductCostHistorySerializer
+)
 
 
 class StockTransactionListView(generics.ListAPIView):
@@ -92,6 +97,28 @@ def stock_adjustment(request):
         else:  # ADJUSTMENT - set to exact quantity
             product.current_stock = quantity
         
+        # Handle cost tracking for IN transactions
+        unit_cost = None
+        total_cost = None
+        cost_changed = False
+        old_cost = product.cost_price
+        
+        if adjustment_type == 'IN':
+            # Get unit_cost from request or default to product's cost_price
+            unit_cost = data.get('unit_cost')
+            if unit_cost is None:
+                unit_cost = product.cost_price
+            else:
+                unit_cost = Decimal(str(unit_cost))
+            
+            # Calculate total cost
+            total_cost = unit_cost * quantity
+            
+            # Update product cost_price if different
+            if unit_cost != old_cost:
+                product.cost_price = unit_cost
+                cost_changed = True
+        
         product.save()
         
         # Create stock transaction
@@ -102,15 +129,56 @@ def stock_adjustment(request):
             quantity=quantity,
             quantity_before=quantity_before,
             quantity_after=product.current_stock,
+            unit_cost=unit_cost,
+            total_cost=total_cost,
             reference_number=data.get('reference_number', ''),
             notes=data.get('notes', ''),
             performed_by=request.user
         )
+        
+        # Create cost history record if cost changed
+        if cost_changed:
+            ProductCostHistory.objects.create(
+                product=product,
+                old_cost=old_cost,
+                new_cost=unit_cost,
+                stock_transaction=stock_transaction,
+                reason=f"Stock IN - {data['reason']}",
+                changed_by=request.user
+            )
     
     return Response({
         'message': 'Stock adjusted successfully',
-        'transaction': StockTransactionSerializer(stock_transaction).data
+        'transaction': StockTransactionSerializer(stock_transaction).data,
+        'cost_updated': cost_changed
     })
+
+
+class ProductCostHistoryListView(generics.ListAPIView):
+    """List product cost history (Admin and Inventory Staff only)"""
+    serializer_class = ProductCostHistorySerializer
+    permission_classes = [IsAuthenticated, IsInventoryStaffOrAdmin]
+    
+    def get_queryset(self):
+        queryset = ProductCostHistory.objects.select_related(
+            'product', 'changed_by', 'stock_transaction'
+        ).all()
+        
+        # Filter by product
+        product_id = self.request.query_params.get('product', None)
+        if product_id:
+            queryset = queryset.filter(product_id=product_id)
+        
+        # Filter by date range
+        start_date = self.request.query_params.get('start_date', None)
+        end_date = self.request.query_params.get('end_date', None)
+        
+        if start_date:
+            queryset = queryset.filter(created_at__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(created_at__lte=end_date)
+        
+        return queryset
 
 
 @api_view(['GET'])
