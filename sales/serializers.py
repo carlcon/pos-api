@@ -31,7 +31,7 @@ class SaleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Sale
         fields = [
-            'id', 'sale_number', 'customer_name', 'payment_method',
+            'id', 'sale_number', 'customer_name', 'payment_method', 'is_wholesale',
             'subtotal', 'discount', 'total_amount', 'notes',
             'cashier', 'cashier_username', 'items', 'created_at'
         ]
@@ -44,12 +44,13 @@ class SaleCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Sale
         fields = [
-            'sale_number', 'customer_name', 'payment_method',
+            'sale_number', 'customer_name', 'payment_method', 'is_wholesale',
             'subtotal', 'discount', 'notes', 'items'
         ]
         extra_kwargs = {
             'sale_number': {'required': False},
             'subtotal': {'required': False},
+            'is_wholesale': {'required': False},
         }
     
     def validate(self, data):

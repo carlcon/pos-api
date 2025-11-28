@@ -21,7 +21,7 @@ class ProductSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'sku', 'name', 'description', 'category', 'category_name',
             'brand', 'model_compatibility', 'unit_of_measure', 'cost_price',
-            'selling_price', 'minimum_stock_level', 'current_stock',
+            'selling_price', 'wholesale_price', 'minimum_stock_level', 'current_stock',
             'barcode', 'image', 'is_active', 'is_low_stock', 'stock_value',
             'created_at', 'updated_at'
         ]
@@ -34,7 +34,7 @@ class ProductCreateUpdateSerializer(serializers.ModelSerializer):
         fields = [
             'sku', 'name', 'description', 'category', 'brand',
             'model_compatibility', 'unit_of_measure', 'cost_price',
-            'selling_price', 'minimum_stock_level', 'barcode', 'image', 'is_active'
+            'selling_price', 'wholesale_price', 'minimum_stock_level', 'barcode', 'image', 'is_active'
         ]
 
 

@@ -55,6 +55,14 @@ class Product(models.Model):
         decimal_places=2,
         validators=[MinValueValidator(Decimal('0.00'))]
     )
+    wholesale_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal('0.00'))],
+        blank=True,
+        null=True,
+        help_text='Wholesale/bulk price (optional)'
+    )
     minimum_stock_level = models.IntegerField(
         default=10,
         validators=[MinValueValidator(0)],
