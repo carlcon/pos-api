@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'oauth2_provider',
     'corsheaders',
     'drf_spectacular',
+    'django_filters',
     
     # Local apps
     'users',
@@ -51,6 +52,7 @@ INSTALLED_APPS = [
     'sales',
     'stock',
     'dashboard',
+    'expenses',
 ]
 
 # Custom User Model

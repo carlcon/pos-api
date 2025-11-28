@@ -10,6 +10,7 @@ from decimal import Decimal
 from inventory.models import Product
 from sales.models import Sale
 from stock.models import StockTransaction
+from expenses.models import Expense, ExpenseCategory
 
 
 @api_view(['GET'])
@@ -647,4 +648,183 @@ def products_by_category_report(request):
             'total_stock': c.total_stock or 0,
             'stock_value': float(c.stock_value or 0)
         } for c in categories]
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def monthly_expenses_report(request):
+    """Get monthly expenses analysis report"""
+    today = timezone.now().date()
+    months_data = []
+    
+    for i in range(12):
+        # Calculate month start
+        month_offset = i
+        year = today.year
+        month = today.month - month_offset
+        while month <= 0:
+            month += 12
+            year -= 1
+        
+        month_start = today.replace(year=year, month=month, day=1)
+        if month == 12:
+            month_end = month_start.replace(year=year + 1, month=1, day=1) - timedelta(days=1)
+        else:
+            month_end = month_start.replace(month=month + 1, day=1) - timedelta(days=1)
+        
+        monthly = Expense.objects.filter(
+            expense_date__gte=month_start,
+            expense_date__lte=month_end
+        ).aggregate(
+            total=Sum('amount'),
+            count=Count('id')
+        )
+        
+        months_data.insert(0, {
+            'month': month_start.strftime('%B %Y'),
+            'month_short': month_start.strftime('%b'),
+            'year': year,
+            'total_expenses': float(monthly['total'] or 0),
+            'transaction_count': monthly['count'] or 0
+        })
+    
+    total_expenses = sum(m['total_expenses'] for m in months_data)
+    
+    return Response({
+        'report_type': 'Monthly Expenses Analysis',
+        'period': f'{months_data[0]["month"]} - {months_data[-1]["month"]}',
+        'summary': {
+            'total_expenses': total_expenses,
+            'average_monthly_expenses': total_expenses / 12,
+            'highest_month': max(months_data, key=lambda x: x['total_expenses'])['month'],
+            'highest_month_amount': max(m['total_expenses'] for m in months_data),
+            'lowest_month': min(months_data, key=lambda x: x['total_expenses'])['month'],
+            'lowest_month_amount': min(m['total_expenses'] for m in months_data)
+        },
+        'monthly_breakdown': months_data
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def expenses_by_category_report(request):
+    """Get expenses breakdown by category"""
+    days = int(request.query_params.get('days', 30))
+    start_date = timezone.now().date() - timedelta(days=days)
+    
+    expenses = Expense.objects.filter(expense_date__gte=start_date)
+    
+    # By category
+    by_category = expenses.values(
+        'category__id',
+        'category__name',
+        'category__color'
+    ).annotate(
+        total=Sum('amount'),
+        count=Count('id')
+    ).order_by('-total')
+    
+    total_amount = sum(float(c['total'] or 0) for c in by_category)
+    
+    return Response({
+        'report_type': 'Expenses by Category',
+        'period': f'Last {days} days',
+        'start_date': start_date.isoformat(),
+        'end_date': timezone.now().date().isoformat(),
+        'summary': {
+            'total_expenses': total_amount,
+            'total_categories': len(by_category),
+            'total_transactions': sum(c['count'] for c in by_category)
+        },
+        'categories': [{
+            'id': c['category__id'],
+            'name': c['category__name'] or 'Uncategorized',
+            'color': c['category__color'] or '#6366f1',
+            'total': float(c['total'] or 0),
+            'count': c['count'],
+            'percentage': round((float(c['total'] or 0) / total_amount * 100), 2) if total_amount > 0 else 0
+        } for c in by_category]
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def expenses_by_vendor_report(request):
+    """Get expenses breakdown by vendor"""
+    days = int(request.query_params.get('days', 30))
+    start_date = timezone.now().date() - timedelta(days=days)
+    
+    by_vendor = Expense.objects.filter(
+        expense_date__gte=start_date
+    ).exclude(
+        vendor__isnull=True
+    ).exclude(
+        vendor=''
+    ).values('vendor').annotate(
+        total=Sum('amount'),
+        count=Count('id')
+    ).order_by('-total')[:20]
+    
+    total_amount = sum(float(v['total'] or 0) for v in by_vendor)
+    
+    return Response({
+        'report_type': 'Expenses by Vendor',
+        'period': f'Last {days} days',
+        'start_date': start_date.isoformat(),
+        'end_date': timezone.now().date().isoformat(),
+        'summary': {
+            'total_expenses': total_amount,
+            'total_vendors': len(by_vendor),
+            'total_transactions': sum(v['count'] for v in by_vendor)
+        },
+        'vendors': [{
+            'name': v['vendor'],
+            'total': float(v['total'] or 0),
+            'count': v['count'],
+            'percentage': round((float(v['total'] or 0) / total_amount * 100), 2) if total_amount > 0 else 0
+        } for v in by_vendor]
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def expense_transactions_report(request):
+    """Get detailed expense transactions report"""
+    days = int(request.query_params.get('days', 30))
+    start_date = timezone.now().date() - timedelta(days=days)
+    
+    expenses = Expense.objects.select_related(
+        'category', 'created_by'
+    ).filter(
+        expense_date__gte=start_date
+    ).order_by('-expense_date', '-created_at')[:500]
+    
+    summary = Expense.objects.filter(expense_date__gte=start_date).aggregate(
+        total=Sum('amount'),
+        count=Count('id')
+    )
+    
+    return Response({
+        'report_type': 'Expense Transactions Report',
+        'period': f'Last {days} days',
+        'start_date': start_date.isoformat(),
+        'end_date': timezone.now().date().isoformat(),
+        'summary': {
+            'total_expenses': float(summary['total'] or 0),
+            'total_transactions': summary['count'] or 0,
+            'average_expense': float(summary['total'] or 0) / max(summary['count'] or 1, 1)
+        },
+        'transactions': [{
+            'id': e.id,
+            'date': e.expense_date.isoformat(),
+            'title': e.title,
+            'description': e.description or '',
+            'category': e.category.name if e.category else 'Uncategorized',
+            'vendor': e.vendor or '-',
+            'payment_method': e.get_payment_method_display(),
+            'amount': float(e.amount),
+            'receipt_number': e.receipt_number or '-',
+            'created_by': e.created_by.username
+        } for e in expenses]
     })
