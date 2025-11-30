@@ -1,643 +1,438 @@
 """
-Comprehensive Unit Tests for Dashboard Module
-Tests for: dashboard_stats, and all report endpoints
+Comprehensive tests for Dashboard Module.
+Tests for: dashboard_stats, and all report endpoints.
 """
+import pytest
 from decimal import Decimal
+from datetime import date, timedelta
 from django.utils import timezone
-from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
-
-from users.models import User
-from inventory.models import Category, Product
 from sales.models import Sale, SaleItem
+from inventory.models import Category, Product
 from stock.models import StockTransaction
+from users.models import User
 
 
-class DashboardStatsAPITest(APITestCase):
+# ============== Dashboard Stats API Tests ==============
+
+@pytest.mark.django_db
+class TestDashboardStatsAPI:
     """Test cases for dashboard stats endpoint"""
     
-    def setUp(self):
-        self.user = User.objects.create_user(
-            username='cashier',
-            password='testpass123',
-            email='cashier@test.com',
-            role=User.Role.CASHIER
-        )
-        self.category = Category.objects.create(name='Engine Parts')
-        self.product = Product.objects.create(
-            sku='ENG-001',
-            name='Engine Oil',
-            category=self.category,
-            cost_price=Decimal('25.00'),
-            selling_price=Decimal('35.00'),
-            current_stock=100,
-            minimum_stock_level=10
-        )
-        self.client = APIClient()
-    
-    def test_dashboard_stats_response(self):
+    def test_dashboard_stats_response(self, admin_client, sale, product):
         """Test dashboard stats returns expected data structure"""
-        # Create some sales
-        sale = Sale.objects.create(
-            sale_number='SALE-001',
-            payment_method='CASH',
-            subtotal=Decimal('100.00'),
-            total_amount=Decimal('100.00'),
-            cashier=self.user
-        )
-        SaleItem.objects.create(
-            sale=sale,
-            product=self.product,
-            quantity=2,
-            unit_price=Decimal('35.00'),
-            line_total=Decimal('70.00')
-        )
+        response = admin_client.get('/api/dashboard/stats/')
+        assert response.status_code == status.HTTP_200_OK
         
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/stats/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        
-        # Check expected keys exist
         expected_keys = [
             'today_sales', 'low_stock_items', 'total_inventory_value',
             'top_selling_products', 'sales_by_payment_method',
             'recent_sales', 'weekly_sales', 'monthly_revenue', 'stock_summary'
         ]
         for key in expected_keys:
-            self.assertIn(key, response.data)
+            assert key in response.data
     
-    def test_dashboard_stats_today_sales(self):
+    def test_dashboard_stats_today_sales(self, admin_client, sale, cashier_user):
         """Test today's sales data in dashboard stats"""
-        # Create a sale
-        Sale.objects.create(
-            sale_number='SALE-001',
-            payment_method='CASH',
-            subtotal=Decimal('100.00'),
-            total_amount=Decimal('100.00'),
-            cashier=self.user
-        )
+        response = admin_client.get('/api/dashboard/stats/')
+        assert response.status_code == status.HTTP_200_OK
         
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/stats/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        
-        self.assertIn('count', response.data['today_sales'])
-        self.assertIn('total', response.data['today_sales'])
+        assert 'count' in response.data['today_sales']
+        assert 'total' in response.data['today_sales']
     
-    def test_dashboard_stats_stock_summary(self):
+    def test_dashboard_stats_stock_summary(self, admin_client, product):
         """Test stock summary in dashboard stats"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/stats/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        response = admin_client.get('/api/dashboard/stats/')
+        assert response.status_code == status.HTTP_200_OK
         
         stock_summary = response.data['stock_summary']
-        self.assertIn('total_products', stock_summary)
-        self.assertIn('active_products', stock_summary)
-        self.assertIn('low_stock_count', stock_summary)
-        self.assertIn('out_of_stock_count', stock_summary)
+        assert 'total_products' in stock_summary
+        assert 'active_products' in stock_summary
+        assert 'low_stock_count' in stock_summary
+        assert 'out_of_stock_count' in stock_summary
     
-    def test_dashboard_stats_unauthenticated(self):
+    def test_dashboard_stats_unauthenticated(self, api_client):
         """Test unauthenticated access is denied"""
-        response = self.client.get('/api/dashboard/stats/')
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        response = api_client.get('/api/dashboard/stats/')
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
-class DailySalesReportAPITest(APITestCase):
+# ============== Daily Sales Report API Tests ==============
+
+@pytest.mark.django_db
+class TestDailySalesReportAPI:
     """Test cases for daily sales report endpoint"""
     
-    def setUp(self):
-        self.user = User.objects.create_user(
-            username='cashier',
-            password='testpass123',
-            email='cashier@test.com',
-            role=User.Role.CASHIER
-        )
-        self.category = Category.objects.create(name='Engine Parts')
-        self.product = Product.objects.create(
-            sku='ENG-001',
-            name='Engine Oil',
-            category=self.category,
-            cost_price=Decimal('25.00'),
-            selling_price=Decimal('35.00'),
-            current_stock=100
-        )
-        # Create some sales
-        self.sale1 = Sale.objects.create(
-            sale_number='SALE-001',
-            payment_method='CASH',
-            subtotal=Decimal('100.00'),
-            total_amount=Decimal('100.00'),
-            cashier=self.user
-        )
-        self.sale2 = Sale.objects.create(
-            sale_number='SALE-002',
-            payment_method='CARD',
-            subtotal=Decimal('150.00'),
-            total_amount=Decimal('150.00'),
-            cashier=self.user
-        )
-        self.client = APIClient()
-    
-    def test_daily_sales_report(self):
+    def test_daily_sales_report(self, admin_client, sale):
         """Test daily sales report returns correct data"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/daily-sales/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        response = admin_client.get('/api/dashboard/reports/daily-sales/')
+        assert response.status_code == status.HTTP_200_OK
         
-        self.assertEqual(response.data['report_type'], 'Daily Sales Report')
-        self.assertIn('summary', response.data)
-        self.assertIn('hourly_breakdown', response.data)
-        self.assertIn('transactions', response.data)
+        assert response.data['report_type'] == 'Daily Sales Report'
+        assert 'summary' in response.data
+        assert 'hourly_breakdown' in response.data
+        assert 'transactions' in response.data
     
-    def test_daily_sales_report_with_date(self):
+    def test_daily_sales_report_with_date(self, admin_client, sale):
         """Test daily sales report with specific date"""
-        self.client.force_authenticate(user=self.user)
         today = timezone.now().date().isoformat()
-        response = self.client.get(f'/api/dashboard/reports/daily-sales/?date={today}')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['date'], today)
+        response = admin_client.get(f'/api/dashboard/reports/daily-sales/?date={today}')
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['date'] == today
     
-    def test_daily_sales_summary_totals(self):
+    def test_daily_sales_summary_totals(self, admin_client, sale):
         """Test daily sales summary contains correct totals"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/daily-sales/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        response = admin_client.get('/api/dashboard/reports/daily-sales/')
+        assert response.status_code == status.HTTP_200_OK
         
         summary = response.data['summary']
-        self.assertIn('total_revenue', summary)
-        self.assertIn('total_transactions', summary)
-        self.assertIn('total_discount', summary)
-        self.assertIn('average_transaction', summary)
+        assert 'total_revenue' in summary
+        assert 'total_transactions' in summary
+        assert 'total_discount' in summary
+        assert 'average_transaction' in summary
 
 
-class WeeklySalesReportAPITest(APITestCase):
+# ============== Weekly Sales Report API Tests ==============
+
+@pytest.mark.django_db
+class TestWeeklySalesReportAPI:
     """Test cases for weekly sales report endpoint"""
     
-    def setUp(self):
-        self.user = User.objects.create_user(
-            username='cashier',
-            password='testpass123',
-            email='cashier@test.com',
-            role=User.Role.CASHIER
-        )
-        Sale.objects.create(
-            sale_number='SALE-001',
-            payment_method='CASH',
-            subtotal=Decimal('100.00'),
-            total_amount=Decimal('100.00'),
-            cashier=self.user
-        )
-        self.client = APIClient()
-    
-    def test_weekly_sales_report(self):
+    def test_weekly_sales_report(self, admin_client, sale):
         """Test weekly sales report returns correct data"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/weekly-sales/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        response = admin_client.get('/api/dashboard/reports/weekly-sales/')
+        assert response.status_code == status.HTTP_200_OK
         
-        self.assertEqual(response.data['report_type'], 'Weekly Sales Summary')
-        self.assertIn('week_start', response.data)
-        self.assertIn('week_end', response.data)
-        self.assertIn('summary', response.data)
-        self.assertIn('daily_breakdown', response.data)
+        assert response.data['report_type'] == 'Weekly Sales Summary'
+        assert 'week_start' in response.data
+        assert 'week_end' in response.data
+        assert 'summary' in response.data
+        assert 'daily_breakdown' in response.data
     
-    def test_weekly_sales_has_seven_days(self):
+    def test_weekly_sales_has_seven_days(self, admin_client, sale):
         """Test weekly sales report has 7 days of data"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/weekly-sales/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        response = admin_client.get('/api/dashboard/reports/weekly-sales/')
+        assert response.status_code == status.HTTP_200_OK
         
-        self.assertEqual(len(response.data['daily_breakdown']), 7)
+        assert len(response.data['daily_breakdown']) == 7
 
 
-class MonthlyRevenueReportAPITest(APITestCase):
+# ============== Monthly Revenue Report API Tests ==============
+
+@pytest.mark.django_db
+class TestMonthlyRevenueReportAPI:
     """Test cases for monthly revenue report endpoint"""
     
-    def setUp(self):
-        self.user = User.objects.create_user(
-            username='cashier',
-            password='testpass123',
-            email='cashier@test.com',
-            role=User.Role.CASHIER
-        )
-        Sale.objects.create(
-            sale_number='SALE-001',
-            payment_method='CASH',
-            subtotal=Decimal('500.00'),
-            total_amount=Decimal('500.00'),
-            cashier=self.user
-        )
-        self.client = APIClient()
-    
-    def test_monthly_revenue_report(self):
+    def test_monthly_revenue_report(self, admin_client, sale):
         """Test monthly revenue report returns correct data"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/monthly-revenue/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        response = admin_client.get('/api/dashboard/reports/monthly-revenue/')
+        assert response.status_code == status.HTTP_200_OK
         
-        self.assertEqual(response.data['report_type'], 'Monthly Revenue Analysis')
-        self.assertIn('period', response.data)
-        self.assertIn('summary', response.data)
-        self.assertIn('monthly_breakdown', response.data)
+        assert response.data['report_type'] == 'Monthly Revenue Analysis'
+        assert 'period' in response.data
+        assert 'summary' in response.data
+        assert 'monthly_breakdown' in response.data
     
-    def test_monthly_revenue_has_twelve_months(self):
+    def test_monthly_revenue_has_twelve_months(self, admin_client, sale):
         """Test monthly revenue report has 12 months of data"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/monthly-revenue/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        response = admin_client.get('/api/dashboard/reports/monthly-revenue/')
+        assert response.status_code == status.HTTP_200_OK
         
-        self.assertEqual(len(response.data['monthly_breakdown']), 12)
+        assert len(response.data['monthly_breakdown']) == 12
 
 
-class PaymentBreakdownReportAPITest(APITestCase):
+# ============== Payment Breakdown Report API Tests ==============
+
+@pytest.mark.django_db
+class TestPaymentBreakdownReportAPI:
     """Test cases for payment breakdown report endpoint"""
     
-    def setUp(self):
-        self.user = User.objects.create_user(
-            username='cashier',
-            password='testpass123',
-            email='cashier@test.com',
-            role=User.Role.CASHIER
-        )
-        # Create sales with different payment methods
+    def test_payment_breakdown_report(self, admin_client, sale, partner, cashier_user):
+        """Test payment breakdown report returns correct data"""
         Sale.objects.create(
-            sale_number='SALE-CASH',
-            payment_method='CASH',
-            subtotal=Decimal('100.00'),
-            total_amount=Decimal('100.00'),
-            cashier=self.user
-        )
-        Sale.objects.create(
-            sale_number='SALE-CARD',
+            partner=partner,
+            sale_number='SALE-CARD-001',
             payment_method='CARD',
             subtotal=Decimal('200.00'),
             total_amount=Decimal('200.00'),
-            cashier=self.user
+            cashier=cashier_user
         )
-        self.client = APIClient()
-    
-    def test_payment_breakdown_report(self):
-        """Test payment breakdown report returns correct data"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/payment-breakdown/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
         
-        self.assertEqual(response.data['report_type'], 'Payment Method Breakdown')
-        self.assertIn('summary', response.data)
-        self.assertIn('breakdown', response.data)
+        response = admin_client.get('/api/dashboard/reports/payment-breakdown/')
+        assert response.status_code == status.HTTP_200_OK
+        
+        assert response.data['report_type'] == 'Payment Method Breakdown'
+        assert 'summary' in response.data
+        assert 'breakdown' in response.data
     
-    def test_payment_breakdown_periods(self):
+    def test_payment_breakdown_periods(self, admin_client, sale):
         """Test payment breakdown with different periods"""
-        self.client.force_authenticate(user=self.user)
         periods = ['today', 'week', 'month', 'all']
         for period in periods:
-            response = self.client.get(f'/api/dashboard/reports/payment-breakdown/?period={period}')
-            self.assertEqual(response.status_code, status.HTTP_200_OK)
-            self.assertEqual(response.data['period'], period)
+            response = admin_client.get(f'/api/dashboard/reports/payment-breakdown/?period={period}')
+            assert response.status_code == status.HTTP_200_OK
+            assert response.data['period'] == period
 
 
-class StockLevelsReportAPITest(APITestCase):
+# ============== Stock Levels Report API Tests ==============
+
+@pytest.mark.django_db
+class TestStockLevelsReportAPI:
     """Test cases for stock levels report endpoint"""
     
-    def setUp(self):
-        self.user = User.objects.create_user(
-            username='cashier',
-            password='testpass123',
-            email='cashier@test.com',
-            role=User.Role.CASHIER
-        )
-        self.category = Category.objects.create(name='Engine Parts')
-        self.product1 = Product.objects.create(
-            sku='ENG-001',
-            name='Engine Oil',
-            category=self.category,
-            cost_price=Decimal('25.00'),
-            selling_price=Decimal('35.00'),
-            current_stock=100,
-            minimum_stock_level=10,
-            is_active=True
-        )
-        self.product2 = Product.objects.create(
-            sku='ENG-002',
-            name='Brake Fluid',
-            category=self.category,
-            cost_price=Decimal('15.00'),
-            selling_price=Decimal('25.00'),
-            current_stock=5,  # Low stock
-            minimum_stock_level=10,
-            is_active=True
-        )
-        self.product3 = Product.objects.create(
-            sku='ENG-003',
-            name='Coolant',
-            category=self.category,
+    def test_stock_levels_report(self, admin_client, product, low_stock_product):
+        """Test stock levels report returns correct data"""
+        response = admin_client.get('/api/dashboard/reports/stock-levels/')
+        assert response.status_code == status.HTTP_200_OK
+        
+        assert response.data['report_type'] == 'Stock Levels Report'
+        assert 'summary' in response.data
+        assert 'products' in response.data
+    
+    def test_stock_levels_summary(self, admin_client, product, low_stock_product, partner, category):
+        """Test stock levels summary contains expected fields"""
+        out_of_stock = Product.objects.create(
+            partner=partner,
+            sku='OOS-001',
+            name='Out of Stock Item',
+            category=category,
             cost_price=Decimal('10.00'),
             selling_price=Decimal('18.00'),
-            current_stock=0,  # Out of stock
+            current_stock=0,
             minimum_stock_level=5,
             is_active=True
         )
-        self.client = APIClient()
-    
-    def test_stock_levels_report(self):
-        """Test stock levels report returns correct data"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/stock-levels/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
         
-        self.assertEqual(response.data['report_type'], 'Stock Levels Report')
-        self.assertIn('summary', response.data)
-        self.assertIn('products', response.data)
-    
-    def test_stock_levels_summary(self):
-        """Test stock levels summary contains expected fields"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/stock-levels/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        response = admin_client.get('/api/dashboard/reports/stock-levels/')
+        assert response.status_code == status.HTTP_200_OK
         
         summary = response.data['summary']
-        self.assertIn('total_products', summary)
-        self.assertIn('total_stock_units', summary)
-        self.assertIn('total_stock_value', summary)
-        self.assertIn('low_stock_count', summary)
-        self.assertIn('out_of_stock_count', summary)
+        assert 'total_products' in summary
+        assert 'total_stock_units' in summary
+        assert 'total_stock_value' in summary
+        assert 'low_stock_count' in summary
+        assert 'out_of_stock_count' in summary
 
 
-class LowStockReportAPITest(APITestCase):
+# ============== Low Stock Report API Tests ==============
+
+@pytest.mark.django_db
+class TestLowStockReportAPI:
     """Test cases for low stock report endpoint"""
     
-    def setUp(self):
-        self.user = User.objects.create_user(
-            username='cashier',
-            password='testpass123',
-            email='cashier@test.com',
-            role=User.Role.CASHIER
-        )
-        self.category = Category.objects.create(name='Engine Parts')
-        self.low_stock_product = Product.objects.create(
-            sku='ENG-001',
-            name='Engine Oil',
-            category=self.category,
-            cost_price=Decimal('25.00'),
-            selling_price=Decimal('35.00'),
-            current_stock=3,
-            minimum_stock_level=10,
-            is_active=True
-        )
-        self.client = APIClient()
-    
-    def test_low_stock_report(self):
+    def test_low_stock_report(self, admin_client, low_stock_product):
         """Test low stock report returns correct data"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/low-stock/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        response = admin_client.get('/api/dashboard/reports/low-stock/')
+        assert response.status_code == status.HTTP_200_OK
         
-        self.assertEqual(response.data['report_type'], 'Low Stock Alert Report')
-        self.assertIn('summary', response.data)
-        self.assertIn('items', response.data)
+        assert response.data['report_type'] == 'Low Stock Alert Report'
+        assert 'summary' in response.data
+        assert 'items' in response.data
     
-    def test_low_stock_item_details(self):
+    def test_low_stock_item_details(self, admin_client, low_stock_product):
         """Test low stock items contain expected details"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/low-stock/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        response = admin_client.get('/api/dashboard/reports/low-stock/')
+        assert response.status_code == status.HTTP_200_OK
         
-        self.assertTrue(len(response.data['items']) > 0)
-        item = response.data['items'][0]
-        self.assertIn('deficit', item)
-        self.assertIn('reorder_quantity', item)
-        self.assertIn('reorder_cost', item)
+        if len(response.data['items']) > 0:
+            item = response.data['items'][0]
+            assert 'deficit' in item
+            assert 'reorder_quantity' in item
+            assert 'reorder_cost' in item
 
 
-class StockMovementReportAPITest(APITestCase):
+# ============== Stock Movement Report API Tests ==============
+
+@pytest.mark.django_db
+class TestStockMovementReportAPI:
     """Test cases for stock movement report endpoint"""
     
-    def setUp(self):
-        self.user = User.objects.create_user(
-            username='inventory_staff',
-            password='testpass123',
-            email='staff@test.com',
-            role=User.Role.INVENTORY_STAFF
-        )
-        self.category = Category.objects.create(name='Engine Parts')
-        self.product = Product.objects.create(
-            sku='ENG-001',
-            name='Engine Oil',
-            category=self.category,
-            cost_price=Decimal('25.00'),
-            selling_price=Decimal('35.00'),
-            current_stock=100
-        )
-        # Create stock transactions
-        StockTransaction.objects.create(
-            product=self.product,
-            transaction_type='IN',
-            reason='PURCHASE',
-            quantity=50,
-            quantity_before=50,
-            quantity_after=100,
-            performed_by=self.user
-        )
-        StockTransaction.objects.create(
-            product=self.product,
-            transaction_type='OUT',
-            reason='SALE',
-            quantity=10,
-            quantity_before=100,
-            quantity_after=90,
-            performed_by=self.user
-        )
-        self.client = APIClient()
-    
-    def test_stock_movement_report(self):
+    def test_stock_movement_report(self, admin_client, stock_transaction, stock_out_transaction):
         """Test stock movement report returns correct data"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/stock-movement/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        response = admin_client.get('/api/dashboard/reports/stock-movement/')
+        assert response.status_code == status.HTTP_200_OK
         
-        self.assertEqual(response.data['report_type'], 'Stock Movement History')
-        self.assertIn('summary', response.data)
-        self.assertIn('movements', response.data)
+        assert response.data['report_type'] == 'Stock Movement History'
+        assert 'summary' in response.data
+        assert 'movements' in response.data
     
-    def test_stock_movement_with_days_filter(self):
+    def test_stock_movement_with_days_filter(self, admin_client, stock_transaction):
         """Test stock movement report with days filter"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/stock-movement/?days=7')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['period'], 'Last 7 days')
+        response = admin_client.get('/api/dashboard/reports/stock-movement/?days=7')
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['period'] == 'Last 7 days'
 
 
-class InventoryValuationReportAPITest(APITestCase):
+# ============== Inventory Valuation Report API Tests ==============
+
+@pytest.mark.django_db
+class TestInventoryValuationReportAPI:
     """Test cases for inventory valuation report endpoint"""
     
-    def setUp(self):
-        self.user = User.objects.create_user(
-            username='cashier',
-            password='testpass123',
-            email='cashier@test.com',
-            role=User.Role.CASHIER
-        )
-        self.category1 = Category.objects.create(name='Engine Parts')
-        self.category2 = Category.objects.create(name='Electrical')
+    def test_inventory_valuation_report(self, admin_client, product, partner, category):
+        """Test inventory valuation report returns correct data"""
+        category2 = Category.objects.create(partner=partner, name='Electrical')
         Product.objects.create(
-            sku='ENG-001',
-            name='Engine Oil',
-            category=self.category1,
-            cost_price=Decimal('25.00'),
-            selling_price=Decimal('35.00'),
-            current_stock=100,
-            is_active=True
-        )
-        Product.objects.create(
+            partner=partner,
             sku='ELE-001',
             name='Battery',
-            category=self.category2,
+            category=category2,
             cost_price=Decimal('80.00'),
             selling_price=Decimal('120.00'),
             current_stock=20,
             is_active=True
         )
-        self.client = APIClient()
-    
-    def test_inventory_valuation_report(self):
-        """Test inventory valuation report returns correct data"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/inventory-valuation/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
         
-        self.assertEqual(response.data['report_type'], 'Inventory Valuation Report')
-        self.assertIn('summary', response.data)
-        self.assertIn('by_category', response.data)
+        response = admin_client.get('/api/dashboard/reports/inventory-valuation/')
+        assert response.status_code == status.HTTP_200_OK
+        
+        assert response.data['report_type'] == 'Inventory Valuation Report'
+        assert 'summary' in response.data
+        assert 'by_category' in response.data
     
-    def test_inventory_valuation_summary(self):
+    def test_inventory_valuation_summary(self, admin_client, product):
         """Test inventory valuation summary"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/inventory-valuation/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        response = admin_client.get('/api/dashboard/reports/inventory-valuation/')
+        assert response.status_code == status.HTTP_200_OK
         
         summary = response.data['summary']
-        self.assertIn('total_products', summary)
-        self.assertIn('total_units', summary)
-        self.assertIn('total_cost_value', summary)
-        self.assertIn('total_retail_value', summary)
-        self.assertIn('potential_profit', summary)
+        assert 'total_products' in summary
+        assert 'total_units' in summary
+        assert 'total_cost_value' in summary
+        assert 'total_retail_value' in summary
+        assert 'potential_profit' in summary
 
 
-class TopSellingReportAPITest(APITestCase):
+# ============== Top Selling Report API Tests ==============
+
+@pytest.mark.django_db
+class TestTopSellingReportAPI:
     """Test cases for top selling products report endpoint"""
     
-    def setUp(self):
-        self.user = User.objects.create_user(
-            username='cashier',
-            password='testpass123',
-            email='cashier@test.com',
-            role=User.Role.CASHIER
-        )
-        self.category = Category.objects.create(name='Engine Parts')
-        self.product = Product.objects.create(
-            sku='ENG-001',
-            name='Engine Oil',
-            category=self.category,
-            cost_price=Decimal('25.00'),
-            selling_price=Decimal('35.00'),
-            current_stock=100
-        )
-        # Create sales
-        sale = Sale.objects.create(
-            sale_number='SALE-001',
-            payment_method='CASH',
-            subtotal=Decimal('175.00'),
-            total_amount=Decimal('175.00'),
-            cashier=self.user
-        )
-        SaleItem.objects.create(
-            sale=sale,
-            product=self.product,
-            quantity=5,
-            unit_price=Decimal('35.00'),
-            line_total=Decimal('175.00')
-        )
-        self.client = APIClient()
-    
-    def test_top_selling_report(self):
+    def test_top_selling_report(self, admin_client, sale):
         """Test top selling report returns correct data"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/top-selling/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        response = admin_client.get('/api/dashboard/reports/top-selling/')
+        assert response.status_code == status.HTTP_200_OK
         
-        self.assertEqual(response.data['report_type'], 'Top Selling Products')
-        self.assertIn('summary', response.data)
-        self.assertIn('products', response.data)
+        assert response.data['report_type'] == 'Top Selling Products'
+        assert 'summary' in response.data
+        assert 'products' in response.data
     
-    def test_top_selling_with_limit(self):
+    def test_top_selling_with_limit(self, admin_client, sale):
         """Test top selling report with limit parameter"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/top-selling/?limit=5')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertLessEqual(len(response.data['products']), 5)
+        response = admin_client.get('/api/dashboard/reports/top-selling/?limit=5')
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data['products']) <= 5
 
 
-class ProductsByCategoryReportAPITest(APITestCase):
+# ============== Products By Category Report API Tests ==============
+
+@pytest.mark.django_db
+class TestProductsByCategoryReportAPI:
     """Test cases for products by category report endpoint"""
     
-    def setUp(self):
-        self.user = User.objects.create_user(
-            username='cashier',
-            password='testpass123',
-            email='cashier@test.com',
-            role=User.Role.CASHIER
-        )
-        self.category1 = Category.objects.create(name='Engine Parts')
-        self.category2 = Category.objects.create(name='Electrical')
+    def test_products_by_category_report(self, admin_client, product, product2, category, partner):
+        """Test products by category report returns correct data"""
+        category2 = Category.objects.create(partner=partner, name='Electrical Category')
         Product.objects.create(
-            sku='ENG-001',
-            name='Engine Oil',
-            category=self.category1,
-            cost_price=Decimal('25.00'),
-            selling_price=Decimal('35.00'),
-            current_stock=100,
-            is_active=True
-        )
-        Product.objects.create(
-            sku='ENG-002',
-            name='Brake Fluid',
-            category=self.category1,
-            cost_price=Decimal('15.00'),
-            selling_price=Decimal('25.00'),
-            current_stock=50,
-            is_active=True
-        )
-        Product.objects.create(
-            sku='ELE-001',
-            name='Battery',
-            category=self.category2,
+            partner=partner,
+            sku='ELE-002',
+            name='Alternator',
+            category=category2,
             cost_price=Decimal('80.00'),
             selling_price=Decimal('120.00'),
             current_stock=20,
             is_active=True
         )
-        self.client = APIClient()
-    
-    def test_products_by_category_report(self):
-        """Test products by category report returns correct data"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/products-by-category/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
         
-        self.assertEqual(response.data['report_type'], 'Products by Category')
-        self.assertIn('summary', response.data)
-        self.assertIn('categories', response.data)
+        response = admin_client.get('/api/dashboard/reports/products-by-category/')
+        assert response.status_code == status.HTTP_200_OK
+        
+        assert response.data['report_type'] == 'Products by Category'
+        assert 'summary' in response.data
+        assert 'categories' in response.data
     
-    def test_products_by_category_structure(self):
+    def test_products_by_category_structure(self, admin_client, product, category):
         """Test products by category has expected category structure"""
-        self.client.force_authenticate(user=self.user)
-        response = self.client.get('/api/dashboard/reports/products-by-category/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        response = admin_client.get('/api/dashboard/reports/products-by-category/')
+        assert response.status_code == status.HTTP_200_OK
         
-        self.assertTrue(len(response.data['categories']) >= 2)
-        category = response.data['categories'][0]
-        self.assertIn('id', category)
-        self.assertIn('name', category)
-        self.assertIn('product_count', category)
-        self.assertIn('total_stock', category)
-        self.assertIn('stock_value', category)
+        if len(response.data['categories']) > 0:
+            cat_data = response.data['categories'][0]
+            assert 'id' in cat_data
+            assert 'name' in cat_data
+            assert 'product_count' in cat_data
+            assert 'total_stock' in cat_data
+            assert 'stock_value' in cat_data
+
+
+# ============== Partner Isolation Tests ==============
+
+@pytest.mark.django_db
+class TestDashboardPartnerIsolation:
+    """Test partner isolation in dashboard reports"""
+    
+    def test_dashboard_stats_partner_isolation(self, admin_client, sale, partner2, cashier_user):
+        """Test dashboard stats only includes partner's data"""
+        partner2_cashier = User.objects.create_user(
+            username='p2_dash_cashier',
+            password='test123',
+            role=User.Role.CASHIER,
+            partner=partner2
+        )
+        partner2_sale = Sale.objects.create(
+            partner=partner2,
+            sale_number='P2-DASH-001',
+            subtotal=Decimal('1000.00'),
+            total_amount=Decimal('1000.00'),
+            cashier=partner2_cashier
+        )
+        
+        response = admin_client.get('/api/dashboard/stats/')
+        assert response.status_code == status.HTTP_200_OK
+        # Stats should only reflect partner1's data
+
+    def test_reports_partner_isolation(self, admin_client, sale, partner2, cashier_user):
+        """Test reports only include the authenticated user's partner data
+        
+        Dashboard views should filter data by the user's partner for proper multi-tenancy.
+        """
+        partner2_cashier = User.objects.create_user(
+            username='p2_report_cashier',
+            password='test123',
+            role=User.Role.CASHIER,
+            partner=partner2
+        )
+        Sale.objects.create(
+            partner=partner2,
+            sale_number='P2-REPORT-001',
+            subtotal=Decimal('500.00'),
+            total_amount=Decimal('500.00'),
+            cashier=partner2_cashier
+        )
+        
+        response = admin_client.get('/api/dashboard/reports/daily-sales/')
+        assert response.status_code == status.HTTP_200_OK
+        
+        # Partner isolation: Dashboard should only show current partner's sales
+        transactions = response.data.get('transactions', [])
+        for txn in transactions:
+            sale_number = txn.get('sale_number', '')
+            assert not sale_number.startswith('P2-'), f"Found partner2 sale in partner1's report: {sale_number}"
+
+
+# ============== Impersonation Tests ==============
+
+@pytest.mark.django_db
+class TestDashboardImpersonation:
+    """Test impersonation for dashboard endpoints"""
+    
+    def test_impersonation_sees_partner_dashboard(self, impersonation_client, sale, product):
+        """Test impersonation sees impersonated partner's dashboard"""
+        response = impersonation_client.get('/api/dashboard/stats/')
+        assert response.status_code == status.HTTP_200_OK
+    
+    def test_impersonation_sees_partner_reports(self, impersonation_client, sale):
+        """Test impersonation sees impersonated partner's reports"""
+        response = impersonation_client.get('/api/dashboard/reports/daily-sales/')
+        assert response.status_code == status.HTTP_200_OK

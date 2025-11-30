@@ -47,9 +47,8 @@ def login_view(request):
         )
     
     # Get or create OAuth2 application
-    try:
-        application = Application.objects.get(name='pos-frontend')
-    except Application.DoesNotExist:
+    application = Application.objects.filter(name='pos-frontend').first()
+    if not application:
         application = Application.objects.create(
             name='pos-frontend',
             client_type=Application.CLIENT_PUBLIC,
@@ -265,9 +264,8 @@ def impersonate_partner(request, partner_id):
         )
     
     # Get or create OAuth2 application
-    try:
-        application = Application.objects.get(name='pos-frontend')
-    except Application.DoesNotExist:
+    application = Application.objects.filter(name='pos-frontend').first()
+    if not application:
         return Response(
             {'error': 'OAuth application not found'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
