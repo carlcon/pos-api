@@ -23,6 +23,14 @@ class StockTransaction(models.Model):
         ('MANUAL', 'Manual Adjustment'),
     ]
     
+    partner = models.ForeignKey(
+        'users.Partner',
+        on_delete=models.CASCADE,
+        related_name='stock_transactions',
+        null=True,
+        blank=True,
+        help_text='Partner/tenant this stock transaction belongs to'
+    )
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='stock_transactions')
     transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPE_CHOICES)
     reason = models.CharField(max_length=30, choices=REASON_CHOICES)
@@ -62,6 +70,7 @@ class StockTransaction(models.Model):
             models.Index(fields=['product']),
             models.Index(fields=['-created_at']),
             models.Index(fields=['transaction_type']),
+            models.Index(fields=['partner']),
         ]
     
     def __str__(self):

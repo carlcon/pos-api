@@ -2,11 +2,29 @@ from rest_framework import permissions
 from users.models import User
 
 
+class IsSuperAdmin(permissions.BasePermission):
+    """Only Super Admin users have access"""
+    
+    def has_permission(self, request, view):
+        return request.user and request.user.is_authenticated and request.user.is_super_admin
+
+
 class IsAdmin(permissions.BasePermission):
     """Only Admin users have access"""
     
     def has_permission(self, request, view):
         return request.user and request.user.is_authenticated and request.user.is_admin
+
+
+class IsAdminOrSuperAdmin(permissions.BasePermission):
+    """Admin or Super Admin users have access"""
+    
+    def has_permission(self, request, view):
+        return (
+            request.user and 
+            request.user.is_authenticated and 
+            (request.user.is_admin or request.user.is_super_admin)
+        )
 
 
 class IsInventoryStaffOrAdmin(permissions.BasePermission):

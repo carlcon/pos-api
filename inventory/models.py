@@ -6,7 +6,15 @@ from decimal import Decimal
 class Category(models.Model):
     """Product categories (Engine, Electrical, Accessories, etc.)"""
     
-    name = models.CharField(max_length=100, unique=True)
+    partner = models.ForeignKey(
+        'users.Partner',
+        on_delete=models.CASCADE,
+        related_name='categories',
+        null=True,
+        blank=True,
+        help_text='Partner/tenant this category belongs to'
+    )
+    name = models.CharField(max_length=100)
     description = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -15,6 +23,12 @@ class Category(models.Model):
         db_table = 'categories'
         ordering = ['name']
         verbose_name_plural = 'Categories'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['partner', 'name'],
+                name='unique_category_per_partner'
+            )
+        ]
     
     def __str__(self):
         return self.name
@@ -33,7 +47,15 @@ class Product(models.Model):
         ('METER', 'Meter'),
     ]
     
-    sku = models.CharField(max_length=100, unique=True, help_text='Stock Keeping Unit / Part Number')
+    partner = models.ForeignKey(
+        'users.Partner',
+        on_delete=models.CASCADE,
+        related_name='products',
+        null=True,
+        blank=True,
+        help_text='Partner/tenant this product belongs to'
+    )
+    sku = models.CharField(max_length=100, help_text='Stock Keeping Unit / Part Number')
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name='products')
@@ -92,6 +114,18 @@ class Product(models.Model):
             models.Index(fields=['sku']),
             models.Index(fields=['barcode']),
             models.Index(fields=['category']),
+            models.Index(fields=['partner']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['partner', 'sku'],
+                name='unique_sku_per_partner'
+            ),
+            models.UniqueConstraint(
+                fields=['partner', 'barcode'],
+                name='unique_barcode_per_partner',
+                condition=models.Q(barcode__isnull=False)
+            )
         ]
     
     def __str__(self):
@@ -111,7 +145,15 @@ class Product(models.Model):
 class Supplier(models.Model):
     """Supplier information"""
     
-    name = models.CharField(max_length=255, unique=True)
+    partner = models.ForeignKey(
+        'users.Partner',
+        on_delete=models.CASCADE,
+        related_name='suppliers',
+        null=True,
+        blank=True,
+        help_text='Partner/tenant this supplier belongs to'
+    )
+    name = models.CharField(max_length=255)
     contact_person = models.CharField(max_length=100, blank=True, null=True)
     email = models.EmailField(blank=True, null=True)
     phone = models.CharField(max_length=20, blank=True, null=True)
@@ -124,6 +166,12 @@ class Supplier(models.Model):
     class Meta:
         db_table = 'suppliers'
         ordering = ['name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['partner', 'name'],
+                name='unique_supplier_per_partner'
+            )
+        ]
     
     def __str__(self):
         return self.name
@@ -140,7 +188,15 @@ class PurchaseOrder(models.Model):
         ('CANCELLED', 'Cancelled'),
     ]
     
-    po_number = models.CharField(max_length=50, unique=True)
+    partner = models.ForeignKey(
+        'users.Partner',
+        on_delete=models.CASCADE,
+        related_name='purchase_orders',
+        null=True,
+        blank=True,
+        help_text='Partner/tenant this purchase order belongs to'
+    )
+    po_number = models.CharField(max_length=50)
     supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name='purchase_orders')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='DRAFT')
     order_date = models.DateField()
@@ -153,6 +209,12 @@ class PurchaseOrder(models.Model):
     class Meta:
         db_table = 'purchase_orders'
         ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['partner', 'po_number'],
+                name='unique_po_number_per_partner'
+            )
+        ]
     
     def __str__(self):
         return f"PO-{self.po_number} - {self.supplier.name}"

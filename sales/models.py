@@ -15,7 +15,15 @@ class Sale(models.Model):
         ('CREDIT', 'Credit'),
     ]
     
-    sale_number = models.CharField(max_length=50, unique=True)
+    partner = models.ForeignKey(
+        'users.Partner',
+        on_delete=models.CASCADE,
+        related_name='sales',
+        null=True,
+        blank=True,
+        help_text='Partner/tenant this sale belongs to'
+    )
+    sale_number = models.CharField(max_length=50)
     customer_name = models.CharField(max_length=255, blank=True, null=True)
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, default='CASH')
     is_wholesale = models.BooleanField(
@@ -49,6 +57,13 @@ class Sale(models.Model):
             models.Index(fields=['sale_number']),
             models.Index(fields=['-created_at']),
             models.Index(fields=['cashier']),
+            models.Index(fields=['partner']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['partner', 'sale_number'],
+                name='unique_sale_number_per_partner'
+            )
         ]
     
     def __str__(self):

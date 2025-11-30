@@ -6,6 +6,7 @@ from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.db.models import Q
 from users.permissions import IsInventoryStaffOrAdmin, CanDeleteProducts
+from users.mixins import PartnerFilterMixin, get_partner_from_request
 from .models import Category, Product, Supplier, PurchaseOrder, POItem
 from .serializers import (
     CategorySerializer, ProductSerializer, ProductCreateUpdateSerializer,
@@ -17,7 +18,7 @@ from .barcode_utils import generate_product_label_pdf, generate_multiple_labels_
 
 
 # Category Views
-class CategoryListCreateView(generics.ListCreateAPIView):
+class CategoryListCreateView(PartnerFilterMixin, generics.ListCreateAPIView):
     """List all categories or create new category"""
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
@@ -29,7 +30,7 @@ class CategoryListCreateView(generics.ListCreateAPIView):
         return [IsAuthenticated()]
 
 
-class CategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
+class CategoryDetailView(PartnerFilterMixin, generics.RetrieveUpdateDestroyAPIView):
     """Retrieve, update or delete a category"""
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
@@ -37,7 +38,7 @@ class CategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 
 # Product Views
-class ProductListCreateView(generics.ListCreateAPIView):
+class ProductListCreateView(PartnerFilterMixin, generics.ListCreateAPIView):
     """List all products or create new product"""
     queryset = Product.objects.select_related('category').all()
     permission_classes = [IsAuthenticated]
@@ -82,7 +83,7 @@ class ProductListCreateView(generics.ListCreateAPIView):
         return queryset
 
 
-class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
+class ProductDetailView(PartnerFilterMixin, generics.RetrieveUpdateDestroyAPIView):
     """Retrieve, update or delete a product"""
     queryset = Product.objects.select_related('category').all()
     permission_classes = [IsAuthenticated, IsInventoryStaffOrAdmin, CanDeleteProducts]
@@ -97,8 +98,12 @@ class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):
 @permission_classes([IsAuthenticated])
 def product_barcode_lookup(request, barcode):
     """Look up product by barcode"""
+    partner = get_partner_from_request(request)
     try:
-        product = Product.objects.select_related('category').get(barcode=barcode)
+        filter_kwargs = {'barcode': barcode}
+        if partner:
+            filter_kwargs['partner'] = partner
+        product = Product.objects.select_related('category').get(**filter_kwargs)
         serializer = ProductSerializer(product)
         return Response(serializer.data)
     except Product.DoesNotExist:
@@ -109,7 +114,7 @@ def product_barcode_lookup(request, barcode):
 
 
 # Supplier Views
-class SupplierListCreateView(generics.ListCreateAPIView):
+class SupplierListCreateView(PartnerFilterMixin, generics.ListCreateAPIView):
     """List all suppliers or create new supplier"""
     queryset = Supplier.objects.all()
     serializer_class = SupplierSerializer
@@ -121,7 +126,7 @@ class SupplierListCreateView(generics.ListCreateAPIView):
         return [IsAuthenticated()]
 
 
-class SupplierDetailView(generics.RetrieveUpdateDestroyAPIView):
+class SupplierDetailView(PartnerFilterMixin, generics.RetrieveUpdateDestroyAPIView):
     """Retrieve, update or delete a supplier"""
     queryset = Supplier.objects.all()
     serializer_class = SupplierSerializer
@@ -129,7 +134,7 @@ class SupplierDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 
 # Purchase Order Views
-class PurchaseOrderListCreateView(generics.ListCreateAPIView):
+class PurchaseOrderListCreateView(PartnerFilterMixin, generics.ListCreateAPIView):
     """List all purchase orders or create new PO"""
     queryset = PurchaseOrder.objects.select_related('supplier', 'created_by').prefetch_related('items__product').all()
     permission_classes = [IsAuthenticated, IsInventoryStaffOrAdmin]
@@ -155,7 +160,7 @@ class PurchaseOrderListCreateView(generics.ListCreateAPIView):
         return queryset
 
 
-class PurchaseOrderDetailView(generics.RetrieveUpdateDestroyAPIView):
+class PurchaseOrderDetailView(PartnerFilterMixin, generics.RetrieveUpdateDestroyAPIView):
     """Retrieve, update or delete a purchase order"""
     queryset = PurchaseOrder.objects.select_related('supplier', 'created_by').prefetch_related('items__product').all()
     serializer_class = PurchaseOrderSerializer
@@ -166,7 +171,11 @@ class PurchaseOrderDetailView(generics.RetrieveUpdateDestroyAPIView):
 @permission_classes([IsAuthenticated, IsInventoryStaffOrAdmin])
 def receive_po_items(request, po_id):
     """Receive items from a purchase order and update stock"""
-    purchase_order = get_object_or_404(PurchaseOrder, id=po_id)
+    partner = get_partner_from_request(request)
+    filter_kwargs = {'id': po_id}
+    if partner:
+        filter_kwargs['partner'] = partner
+    purchase_order = get_object_or_404(PurchaseOrder, **filter_kwargs)
     
     if purchase_order.status == 'RECEIVED':
         return Response(
@@ -211,6 +220,7 @@ def receive_po_items(request, po_id):
             # Create stock transaction
             StockTransaction.objects.create(
                 product=product,
+                partner=partner,
                 transaction_type='IN',
                 reason='PURCHASE',
                 quantity=received_qty,
@@ -238,7 +248,11 @@ def receive_po_items(request, po_id):
 @permission_classes([IsAuthenticated])
 def print_product_label(request, product_id):
     """Generate and return barcode label PDF for a single product"""
-    product = get_object_or_404(Product, id=product_id)
+    partner = get_partner_from_request(request)
+    filter_kwargs = {'id': product_id}
+    if partner:
+        filter_kwargs['partner'] = partner
+    product = get_object_or_404(Product, **filter_kwargs)
     label_size = request.query_params.get('size', '2x1')  # 2x1 or 3x2
     
     return generate_product_label_pdf(product, label_size)
@@ -257,7 +271,11 @@ def print_multiple_labels(request):
             status=status.HTTP_400_BAD_REQUEST
         )
     
-    products = Product.objects.filter(id__in=product_ids)
+    partner = get_partner_from_request(request)
+    filter_kwargs = {'id__in': product_ids}
+    if partner:
+        filter_kwargs['partner'] = partner
+    products = Product.objects.filter(**filter_kwargs)
     
     if not products.exists():
         return Response(

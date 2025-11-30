@@ -7,6 +7,7 @@ from django.db.models import Sum, Count
 from django.utils import timezone
 from datetime import timedelta
 
+from users.mixins import PartnerFilterViewSetMixin, get_partner_from_request
 from .models import Expense, ExpenseCategory
 from .serializers import (
     ExpenseSerializer, 
@@ -15,7 +16,7 @@ from .serializers import (
 )
 
 
-class ExpenseCategoryViewSet(viewsets.ModelViewSet):
+class ExpenseCategoryViewSet(PartnerFilterViewSetMixin, viewsets.ModelViewSet):
     """ViewSet for expense categories"""
     queryset = ExpenseCategory.objects.all()
     serializer_class = ExpenseCategorySerializer
@@ -33,7 +34,7 @@ class ExpenseCategoryViewSet(viewsets.ModelViewSet):
         return queryset
 
 
-class ExpenseViewSet(viewsets.ModelViewSet):
+class ExpenseViewSet(PartnerFilterViewSetMixin, viewsets.ModelViewSet):
     """ViewSet for expenses CRUD"""
     queryset = Expense.objects.all()
     permission_classes = [IsAuthenticated]
@@ -72,14 +73,21 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         return queryset
     
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        partner = get_partner_from_request(self.request)
+        serializer.save(created_by=self.request.user, partner=partner)
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def expense_stats(request):
     """Get expense statistics for dashboard"""
+    partner = get_partner_from_request(request)
     today = timezone.now().date()
+    
+    # Base queryset filtered by partner
+    base_queryset = Expense.objects.all()
+    if partner:
+        base_queryset = base_queryset.filter(partner=partner)
     
     # Current month
     month_start = today.replace(day=1)
@@ -97,31 +105,31 @@ def expense_stats(request):
         last_month_end = month_start - timedelta(days=1)
     
     # Aggregate stats
-    total_stats = Expense.objects.aggregate(
+    total_stats = base_queryset.aggregate(
         total_expenses=Sum('amount'),
         total_count=Count('id')
     )
     
-    this_month = Expense.objects.filter(
+    this_month = base_queryset.filter(
         expense_date__gte=month_start,
         expense_date__lte=month_end
     ).aggregate(total=Sum('amount'))
     
-    last_month = Expense.objects.filter(
+    last_month = base_queryset.filter(
         expense_date__gte=last_month_start,
         expense_date__lte=last_month_end
     ).aggregate(total=Sum('amount'))
     
     # By category
     by_category = list(
-        Expense.objects.values('category__name', 'category__color')
+        base_queryset.values('category__name', 'category__color')
         .annotate(total=Sum('amount'), count=Count('id'))
         .order_by('-total')[:10]
     )
     
     # By payment method
     by_payment_method = list(
-        Expense.objects.values('payment_method')
+        base_queryset.values('payment_method')
         .annotate(total=Sum('amount'), count=Count('id'))
         .order_by('-total')
     )
@@ -142,7 +150,7 @@ def expense_stats(request):
         else:
             m_end = m_start.replace(month=m_month + 1, day=1) - timedelta(days=1)
         
-        m_total = Expense.objects.filter(
+        m_total = base_queryset.filter(
             expense_date__gte=m_start,
             expense_date__lte=m_end
         ).aggregate(total=Sum('amount'))['total'] or 0
@@ -153,7 +161,7 @@ def expense_stats(request):
         })
     
     # Today's expenses
-    today_expenses = Expense.objects.filter(expense_date=today).aggregate(
+    today_expenses = base_queryset.filter(expense_date=today).aggregate(
         total=Sum('amount'),
         count=Count('id')
     )

@@ -6,6 +6,7 @@ from django.shortcuts import get_object_or_404
 from django.db import transaction
 from decimal import Decimal
 from users.permissions import IsInventoryStaffOrAdmin
+from users.mixins import PartnerFilterMixin, get_partner_from_request
 from inventory.models import Product
 from .models import StockTransaction, ProductCostHistory
 from .serializers import (
@@ -15,7 +16,7 @@ from .serializers import (
 )
 
 
-class StockTransactionListView(generics.ListAPIView):
+class StockTransactionListView(PartnerFilterMixin, generics.ListAPIView):
     """List all stock transactions"""
     queryset = StockTransaction.objects.select_related('product', 'performed_by').all()
     serializer_class = StockTransactionSerializer
@@ -46,7 +47,7 @@ class StockTransactionListView(generics.ListAPIView):
         return queryset
 
 
-class StockTransactionDetailView(generics.RetrieveAPIView):
+class StockTransactionDetailView(PartnerFilterMixin, generics.RetrieveAPIView):
     """Retrieve a stock transaction"""
     queryset = StockTransaction.objects.select_related('product', 'performed_by').all()
     serializer_class = StockTransactionSerializer
@@ -57,6 +58,7 @@ class StockTransactionDetailView(generics.RetrieveAPIView):
 @permission_classes([IsAuthenticated, IsInventoryStaffOrAdmin])
 def stock_adjustment(request):
     """Manually adjust stock (IN/OUT/ADJUSTMENT for damaged, lost, reconciliation, etc.)"""
+    partner = get_partner_from_request(request)
     serializer = StockAdjustmentSerializer(data=request.data)
     
     if not serializer.is_valid():
@@ -66,16 +68,22 @@ def stock_adjustment(request):
     
     with transaction.atomic():
         # Get product (by ID or barcode)
+        filter_kwargs = {}
+        if partner:
+            filter_kwargs['partner'] = partner
+            
         if 'barcode' in data and data['barcode']:
             try:
-                product = Product.objects.get(barcode=data['barcode'])
+                filter_kwargs['barcode'] = data['barcode']
+                product = Product.objects.get(**filter_kwargs)
             except Product.DoesNotExist:
                 return Response(
                     {'error': 'Product not found with this barcode'},
                     status=status.HTTP_404_NOT_FOUND
                 )
         else:
-            product = get_object_or_404(Product, id=data['product_id'])
+            filter_kwargs['id'] = data['product_id']
+            product = get_object_or_404(Product, **filter_kwargs)
         
         quantity = data['quantity']
         adjustment_type = data['adjustment_type']
@@ -124,6 +132,7 @@ def stock_adjustment(request):
         # Create stock transaction
         stock_transaction = StockTransaction.objects.create(
             product=product,
+            partner=partner,
             transaction_type=adjustment_type,
             reason=data['reason'],
             quantity=quantity,
@@ -154,15 +163,21 @@ def stock_adjustment(request):
     })
 
 
-class ProductCostHistoryListView(generics.ListAPIView):
+class ProductCostHistoryListView(PartnerFilterMixin, generics.ListAPIView):
     """List product cost history (Admin and Inventory Staff only)"""
     serializer_class = ProductCostHistorySerializer
     permission_classes = [IsAuthenticated, IsInventoryStaffOrAdmin]
+    partner_field = 'product__partner'  # Filter through product's partner
     
     def get_queryset(self):
         queryset = ProductCostHistory.objects.select_related(
             'product', 'changed_by', 'stock_transaction'
         ).all()
+        
+        # Apply partner filter
+        partner = get_partner_from_request(self.request)
+        if partner:
+            queryset = queryset.filter(product__partner=partner)
         
         # Filter by product
         product_id = self.request.query_params.get('product', None)
@@ -187,7 +202,11 @@ def low_stock_products(request):
     """Get products with stock below minimum level"""
     from inventory.serializers import ProductSerializer
     
+    partner = get_partner_from_request(request)
     products = Product.objects.select_related('category').all()
+    if partner:
+        products = products.filter(partner=partner)
+    
     low_stock = [p for p in products if p.is_low_stock and p.is_active]
     
     serializer = ProductSerializer(low_stock, many=True)

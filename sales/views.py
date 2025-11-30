@@ -6,11 +6,12 @@ from django.db.models import Sum, Count, Q
 from django.utils import timezone
 from datetime import timedelta
 from users.permissions import IsCashierOrAbove
+from users.mixins import PartnerFilterMixin, get_partner_from_request
 from .models import Sale, SaleItem
 from .serializers import SaleSerializer, SaleCreateSerializer
 
 
-class SaleListCreateView(generics.ListCreateAPIView):
+class SaleListCreateView(PartnerFilterMixin, generics.ListCreateAPIView):
     """List all sales or create new sale"""
     queryset = Sale.objects.select_related('cashier').prefetch_related('items__product').all()
     permission_classes = [IsAuthenticated, IsCashierOrAbove]
@@ -45,7 +46,7 @@ class SaleListCreateView(generics.ListCreateAPIView):
         return queryset
 
 
-class SaleDetailView(generics.RetrieveAPIView):
+class SaleDetailView(PartnerFilterMixin, generics.RetrieveAPIView):
     """Retrieve a sale"""
     queryset = Sale.objects.select_related('cashier').prefetch_related('items__product').all()
     serializer_class = SaleSerializer
@@ -56,6 +57,8 @@ class SaleDetailView(generics.RetrieveAPIView):
 @permission_classes([IsAuthenticated])
 def sales_summary(request):
     """Get sales summary statistics"""
+    partner = get_partner_from_request(request)
+    
     # Get date filters
     period = request.query_params.get('period', 'today')  # today, week, month
     
@@ -70,6 +73,8 @@ def sales_summary(request):
         start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
     
     sales = Sale.objects.filter(created_at__gte=start_date)
+    if partner:
+        sales = sales.filter(partner=partner)
     
     total_sales = sales.aggregate(
         count=Count('id'),
@@ -89,6 +94,8 @@ def sales_summary(request):
 @permission_classes([IsAuthenticated])
 def top_selling_products(request):
     """Get top-selling products"""
+    partner = get_partner_from_request(request)
+    
     limit = int(request.query_params.get('limit', 10))
     period = request.query_params.get('period', 'month')
     
@@ -100,9 +107,12 @@ def top_selling_products(request):
     else:
         start_date = now - timedelta(days=30)
     
+    queryset = SaleItem.objects.filter(sale__created_at__gte=start_date)
+    if partner:
+        queryset = queryset.filter(sale__partner=partner)
+    
     top_products = (
-        SaleItem.objects
-        .filter(sale__created_at__gte=start_date)
+        queryset
         .values('product__id', 'product__name', 'product__sku')
         .annotate(
             total_quantity=Sum('quantity'),

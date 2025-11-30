@@ -4,7 +4,15 @@ from django.conf import settings
 
 class ExpenseCategory(models.Model):
     """Categories for organizing expenses"""
-    name = models.CharField(max_length=100, unique=True)
+    partner = models.ForeignKey(
+        'users.Partner',
+        on_delete=models.CASCADE,
+        related_name='expense_categories',
+        null=True,
+        blank=True,
+        help_text='Partner/tenant this expense category belongs to'
+    )
+    name = models.CharField(max_length=100)
     description = models.TextField(blank=True)
     color = models.CharField(max_length=7, default='#6366f1')  # Hex color for UI
     is_active = models.BooleanField(default=True)
@@ -14,6 +22,12 @@ class ExpenseCategory(models.Model):
     class Meta:
         verbose_name_plural = 'Expense Categories'
         ordering = ['name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['partner', 'name'],
+                name='unique_expense_category_per_partner'
+            )
+        ]
     
     def __str__(self):
         return self.name
@@ -31,6 +45,14 @@ class Expense(models.Model):
         ('OTHER', 'Other'),
     ]
     
+    partner = models.ForeignKey(
+        'users.Partner',
+        on_delete=models.CASCADE,
+        related_name='expenses',
+        null=True,
+        blank=True,
+        help_text='Partner/tenant this expense belongs to'
+    )
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
