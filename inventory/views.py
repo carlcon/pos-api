@@ -6,7 +6,7 @@ from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.db.models import Q
 from users.permissions import IsInventoryStaffOrAdmin, CanDeleteProducts
-from users.mixins import PartnerFilterMixin, get_partner_from_request
+from users.mixins import PartnerFilterMixin, require_partner_for_request
 from .models import Category, Product, Supplier, PurchaseOrder, POItem
 from .serializers import (
     CategorySerializer, ProductSerializer, ProductCreateUpdateSerializer,
@@ -98,12 +98,9 @@ class ProductDetailView(PartnerFilterMixin, generics.RetrieveUpdateDestroyAPIVie
 @permission_classes([IsAuthenticated])
 def product_barcode_lookup(request, barcode):
     """Look up product by barcode"""
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     try:
-        filter_kwargs = {'barcode': barcode}
-        if partner:
-            filter_kwargs['partner'] = partner
-        product = Product.objects.select_related('category').get(**filter_kwargs)
+        product = Product.objects.select_related('category').get(barcode=barcode, partner=partner)
         serializer = ProductSerializer(product)
         return Response(serializer.data)
     except Product.DoesNotExist:
@@ -171,11 +168,8 @@ class PurchaseOrderDetailView(PartnerFilterMixin, generics.RetrieveUpdateDestroy
 @permission_classes([IsAuthenticated, IsInventoryStaffOrAdmin])
 def receive_po_items(request, po_id):
     """Receive items from a purchase order and update stock"""
-    partner = get_partner_from_request(request)
-    filter_kwargs = {'id': po_id}
-    if partner:
-        filter_kwargs['partner'] = partner
-    purchase_order = get_object_or_404(PurchaseOrder, **filter_kwargs)
+    partner = require_partner_for_request(request)
+    purchase_order = get_object_or_404(PurchaseOrder, id=po_id, partner=partner)
     
     if purchase_order.status == 'RECEIVED':
         return Response(
@@ -248,11 +242,8 @@ def receive_po_items(request, po_id):
 @permission_classes([IsAuthenticated])
 def print_product_label(request, product_id):
     """Generate and return barcode label PDF for a single product"""
-    partner = get_partner_from_request(request)
-    filter_kwargs = {'id': product_id}
-    if partner:
-        filter_kwargs['partner'] = partner
-    product = get_object_or_404(Product, **filter_kwargs)
+    partner = require_partner_for_request(request)
+    product = get_object_or_404(Product, id=product_id, partner=partner)
     label_size = request.query_params.get('size', '2x1')  # 2x1 or 3x2
     
     return generate_product_label_pdf(product, label_size)
@@ -271,11 +262,8 @@ def print_multiple_labels(request):
             status=status.HTTP_400_BAD_REQUEST
         )
     
-    partner = get_partner_from_request(request)
-    filter_kwargs = {'id__in': product_ids}
-    if partner:
-        filter_kwargs['partner'] = partner
-    products = Product.objects.filter(**filter_kwargs)
+    partner = require_partner_for_request(request)
+    products = Product.objects.filter(id__in=product_ids, partner=partner)
     
     if not products.exists():
         return Response(

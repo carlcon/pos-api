@@ -337,6 +337,13 @@ class TestStockTransactionListAPI:
         assert stock_transaction.id in ids
         assert partner2_transaction.id not in ids
 
+    def test_super_admin_must_impersonate(self, super_admin_client):
+        """Super admin without impersonation cannot access stock transactions"""
+        response = super_admin_client.get('/api/stock/transactions/')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert 'impersonate' in str(response.data.get('detail', '')).lower()
+
     def test_filter_transactions_by_type(self, admin_client, stock_transaction, stock_out_transaction):
         """Test filtering transactions by type"""
         response = admin_client.get('/api/stock/transactions/?type=IN')

@@ -170,6 +170,13 @@ class TestCategoryListAPI:
         assert category.name in names
         assert partner2_category.name not in names
 
+    def test_super_admin_must_impersonate(self, super_admin_client):
+        """Super admin without impersonation is blocked from tenant data"""
+        response = super_admin_client.get('/api/inventory/categories/')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert 'impersonate' in str(response.data.get('detail', '')).lower()
+
     def test_unauthenticated_cannot_list_categories(self, api_client):
         """Test unauthenticated request is rejected"""
         response = api_client.get('/api/inventory/categories/')

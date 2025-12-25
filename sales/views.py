@@ -6,7 +6,7 @@ from django.db.models import Sum, Count, Q
 from django.utils import timezone
 from datetime import timedelta
 from users.permissions import IsCashierOrAbove
-from users.mixins import PartnerFilterMixin, get_partner_from_request
+from users.mixins import PartnerFilterMixin, require_partner_for_request
 from .models import Sale, SaleItem
 from .serializers import SaleSerializer, SaleCreateSerializer
 
@@ -57,7 +57,7 @@ class SaleDetailView(PartnerFilterMixin, generics.RetrieveAPIView):
 @permission_classes([IsAuthenticated])
 def sales_summary(request):
     """Get sales summary statistics"""
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     
     # Get date filters
     period = request.query_params.get('period', 'today')  # today, week, month
@@ -94,7 +94,7 @@ def sales_summary(request):
 @permission_classes([IsAuthenticated])
 def top_selling_products(request):
     """Get top-selling products"""
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     
     limit = int(request.query_params.get('limit', 10))
     period = request.query_params.get('period', 'month')

@@ -1,22 +1,23 @@
 from django.contrib import admin
+from users.admin import PartnerScopedAdmin
 from .models import StockTransaction, ProductCostHistory
 
 
 @admin.register(StockTransaction)
-class StockTransactionAdmin(admin.ModelAdmin):
-    list_display = ['product', 'transaction_type', 'reason', 'quantity', 
+class StockTransactionAdmin(PartnerScopedAdmin):
+    list_display = ['product', 'partner', 'transaction_type', 'reason', 'quantity',
                    'quantity_before', 'quantity_after', 'unit_cost', 'total_cost',
                    'performed_by', 'created_at']
-    list_filter = ['transaction_type', 'reason', 'created_at']
+    list_filter = ['partner', 'transaction_type', 'reason', 'created_at']
     search_fields = ['product__name', 'product__sku', 'reference_number']
     readonly_fields = ['created_at']
 
 
 @admin.register(ProductCostHistory)
-class ProductCostHistoryAdmin(admin.ModelAdmin):
-    list_display = ['product', 'old_cost', 'new_cost', 'cost_difference', 
+class ProductCostHistoryAdmin(PartnerScopedAdmin):
+    list_display = ['product', 'partner', 'old_cost', 'new_cost', 'cost_difference',
                    'percentage_change', 'reason', 'changed_by', 'created_at']
-    list_filter = ['created_at', 'reason']
+    list_filter = ['partner', 'created_at', 'reason']
     search_fields = ['product__name', 'product__sku', 'reason']
     readonly_fields = ['created_at', 'cost_difference', 'percentage_change']
     raw_id_fields = ['product', 'stock_transaction', 'changed_by']

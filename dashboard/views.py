@@ -11,15 +11,13 @@ from inventory.models import Product
 from sales.models import Sale
 from stock.models import StockTransaction
 from expenses.models import Expense, ExpenseCategory
-from users.mixins import get_partner_from_request
+from users.mixins import require_partner_for_request
 
 
 def get_partner_filtered_queryset(model, request, partner_field='partner'):
     """Helper to get partner-filtered queryset for dashboard views."""
-    partner = get_partner_from_request(request)
-    queryset = model.objects.all()
-    if partner is not None:
-        queryset = queryset.filter(**{partner_field: partner})
+    partner = require_partner_for_request(request)
+    queryset = model.objects.filter(**{partner_field: partner})
     return queryset, partner
 
 
@@ -29,7 +27,7 @@ def dashboard_stats(request):
     """
     Get comprehensive dashboard statistics
     """
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     today = timezone.now().date()
     yesterday = today - timedelta(days=1)
     week_ago = today - timedelta(days=7)
@@ -186,7 +184,7 @@ def daily_sales_report(request):
     """Get daily sales report for a specific date or date range"""
     from sales.models import SaleItem
     
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     
     date_str = request.query_params.get('date', timezone.now().date().isoformat())
     try:
@@ -249,7 +247,7 @@ def daily_sales_report(request):
 @permission_classes([IsAuthenticated])
 def weekly_sales_report(request):
     """Get weekly sales summary"""
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     today = timezone.now().date()
     week_start = today - timedelta(days=today.weekday())
     
@@ -299,7 +297,7 @@ def monthly_revenue_report(request):
     """Get monthly revenue analysis"""
     from sales.models import SaleItem
     
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     today = timezone.now().date()
     months_data = []
     
@@ -380,7 +378,7 @@ def monthly_revenue_report(request):
 @permission_classes([IsAuthenticated])
 def payment_breakdown_report(request):
     """Get payment method breakdown"""
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     date_str = request.query_params.get('date')
     period = request.query_params.get('period', 'today')  # today, week, month, all
     
@@ -438,7 +436,7 @@ def payment_breakdown_report(request):
 @permission_classes([IsAuthenticated])
 def stock_levels_report(request):
     """Get comprehensive stock levels report"""
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     products = Product.objects.select_related('category').filter(is_active=True)
     if partner:
         products = products.filter(partner=partner)
@@ -492,7 +490,7 @@ def stock_levels_report(request):
 @permission_classes([IsAuthenticated])
 def low_stock_report(request):
     """Get low stock alert report"""
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     products = Product.objects.select_related('category').filter(
         is_active=True,
         current_stock__lte=F('minimum_stock_level')
@@ -531,7 +529,7 @@ def low_stock_report(request):
 @permission_classes([IsAuthenticated])
 def stock_movement_report(request):
     """Get stock movement history report"""
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     days = int(request.query_params.get('days', 30))
     start_date = timezone.now().date() - timedelta(days=days)
     
@@ -584,7 +582,7 @@ def inventory_valuation_report(request):
     """Get inventory valuation report"""
     from inventory.models import Category
     
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     products = Product.objects.select_related('category').filter(is_active=True)
     if partner:
         products = products.filter(partner=partner)
@@ -633,7 +631,7 @@ def top_selling_report(request):
     """Get top selling products report"""
     from sales.models import SaleItem
     
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     days = int(request.query_params.get('days', 30))
     limit = int(request.query_params.get('limit', 20))
     start_date = timezone.now().date() - timedelta(days=days)
@@ -683,7 +681,7 @@ def products_by_category_report(request):
     """Get products breakdown by category"""
     from inventory.models import Category
     
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     categories = Category.objects.all()
     if partner:
         categories = categories.filter(partner=partner)
@@ -719,7 +717,7 @@ def products_by_category_report(request):
 @permission_classes([IsAuthenticated])
 def monthly_expenses_report(request):
     """Get monthly expenses analysis report"""
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     today = timezone.now().date()
     months_data = []
     
@@ -779,7 +777,7 @@ def monthly_expenses_report(request):
 @permission_classes([IsAuthenticated])
 def expenses_by_category_report(request):
     """Get expenses breakdown by category"""
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     days = int(request.query_params.get('days', 30))
     start_date = timezone.now().date() - timedelta(days=days)
     
@@ -824,7 +822,7 @@ def expenses_by_category_report(request):
 @permission_classes([IsAuthenticated])
 def expenses_by_vendor_report(request):
     """Get expenses breakdown by vendor"""
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     days = int(request.query_params.get('days', 30))
     start_date = timezone.now().date() - timedelta(days=days)
     
@@ -866,7 +864,7 @@ def expenses_by_vendor_report(request):
 @permission_classes([IsAuthenticated])
 def expense_transactions_report(request):
     """Get detailed expense transactions report"""
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     days = int(request.query_params.get('days', 30))
     start_date = timezone.now().date() - timedelta(days=days)
     

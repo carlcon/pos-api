@@ -7,7 +7,7 @@ from django.db.models import Sum, Count
 from django.utils import timezone
 from datetime import timedelta
 
-from users.mixins import PartnerFilterViewSetMixin, get_partner_from_request
+from users.mixins import PartnerFilterViewSetMixin, require_partner_for_request
 from .models import Expense, ExpenseCategory
 from .serializers import (
     ExpenseSerializer, 
@@ -73,7 +73,7 @@ class ExpenseViewSet(PartnerFilterViewSetMixin, viewsets.ModelViewSet):
         return queryset
     
     def perform_create(self, serializer):
-        partner = get_partner_from_request(self.request)
+        partner = require_partner_for_request(self.request)
         serializer.save(created_by=self.request.user, partner=partner)
 
 
@@ -81,7 +81,7 @@ class ExpenseViewSet(PartnerFilterViewSetMixin, viewsets.ModelViewSet):
 @permission_classes([IsAuthenticated])
 def expense_stats(request):
     """Get expense statistics for dashboard"""
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     today = timezone.now().date()
     
     # Base queryset filtered by partner

@@ -6,6 +6,9 @@ from oauth2_provider.models import AccessToken
 from users.models import Partner
 
 
+IMPERSONATION_REQUIRED_MESSAGE = "Super admin must impersonate a partner to access tenant data."
+
+
 def get_partner_from_request(request):
     """
     Get the effective partner for the current request.
@@ -43,6 +46,19 @@ def get_partner_from_request(request):
     return user.partner
 
 
+def require_partner_for_request(request, *, required=True):
+    """Return partner or raise a helpful 403 when partner is required and missing."""
+    partner = get_partner_from_request(request)
+
+    if partner is None and required:
+        user = getattr(request, 'user', None)
+        if getattr(user, 'is_super_admin', False):
+            raise PermissionDenied(IMPERSONATION_REQUIRED_MESSAGE)
+        raise PermissionDenied("User not associated with any partner.")
+
+    return partner
+
+
 class PartnerFilterMixin:
     """
     Mixin for filtering querysets by partner.
@@ -63,18 +79,7 @@ class PartnerFilterMixin:
     
     def get_effective_partner(self):
         """Get the partner for filtering/assignment."""
-        partner = get_partner_from_request(self.request)
-        
-        if partner is None and self.require_partner:
-            user = self.request.user
-            if user.is_super_admin:
-                raise PermissionDenied(
-                    "Super admin must select a partner first. Use impersonation to view partner data."
-                )
-            # Non-super-admin without partner shouldn't happen, but handle it
-            raise PermissionDenied("User not associated with any partner.")
-        
-        return partner
+        return require_partner_for_request(self.request, required=self.require_partner)
     
     def get_queryset(self):
         """Filter queryset by partner."""

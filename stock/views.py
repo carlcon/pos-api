@@ -6,7 +6,7 @@ from django.shortcuts import get_object_or_404
 from django.db import transaction
 from decimal import Decimal
 from users.permissions import IsInventoryStaffOrAdmin
-from users.mixins import PartnerFilterMixin, get_partner_from_request
+from users.mixins import PartnerFilterMixin, require_partner_for_request
 from inventory.models import Product
 from .models import StockTransaction, ProductCostHistory
 from .serializers import (
@@ -58,7 +58,7 @@ class StockTransactionDetailView(PartnerFilterMixin, generics.RetrieveAPIView):
 @permission_classes([IsAuthenticated, IsInventoryStaffOrAdmin])
 def stock_adjustment(request):
     """Manually adjust stock (IN/OUT/ADJUSTMENT for damaged, lost, reconciliation, etc.)"""
-    partner = get_partner_from_request(request)
+    partner = require_partner_for_request(request)
     serializer = StockAdjustmentSerializer(data=request.data)
     
     if not serializer.is_valid():
@@ -174,10 +174,8 @@ class ProductCostHistoryListView(PartnerFilterMixin, generics.ListAPIView):
             'product', 'changed_by', 'stock_transaction'
         ).all()
         
-        # Apply partner filter
-        partner = get_partner_from_request(self.request)
-        if partner:
-            queryset = queryset.filter(product__partner=partner)
+        partner = require_partner_for_request(self.request)
+        queryset = queryset.filter(product__partner=partner)
         
         # Filter by product
         product_id = self.request.query_params.get('product', None)
@@ -202,10 +200,8 @@ def low_stock_products(request):
     """Get products with stock below minimum level"""
     from inventory.serializers import ProductSerializer
     
-    partner = get_partner_from_request(request)
-    products = Product.objects.select_related('category').all()
-    if partner:
-        products = products.filter(partner=partner)
+    partner = require_partner_for_request(request)
+    products = Product.objects.select_related('category').filter(partner=partner)
     
     low_stock = [p for p in products if p.is_low_stock and p.is_active]
     

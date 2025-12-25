@@ -50,6 +50,13 @@ class TestDashboardStatsAPI:
         assert 'active_products' in stock_summary
         assert 'low_stock_count' in stock_summary
         assert 'out_of_stock_count' in stock_summary
+
+    def test_super_admin_must_impersonate(self, super_admin_client):
+        """Super admin without impersonation cannot access dashboard stats"""
+        response = super_admin_client.get('/api/dashboard/stats/')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert 'impersonate' in str(response.data.get('detail', '')).lower()
     
     def test_dashboard_stats_unauthenticated(self, api_client):
         """Test unauthenticated access is denied"""

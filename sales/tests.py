@@ -178,6 +178,13 @@ class TestSaleListAPI:
         assert sale.sale_number in sale_numbers
         assert partner2_sale.sale_number not in sale_numbers
 
+    def test_super_admin_must_impersonate(self, super_admin_client):
+        """Super admin without impersonation cannot access sales data"""
+        response = super_admin_client.get('/api/sales/')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert 'impersonate' in str(response.data.get('detail', '')).lower()
+
     def test_filter_sales_by_date(self, admin_client, sale):
         """Test filtering sales by date range"""
         today = date.today()

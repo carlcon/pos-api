@@ -79,7 +79,14 @@ class StockTransaction(models.Model):
 
 class ProductCostHistory(models.Model):
     """Track product cost price changes for auditing"""
-    
+    partner = models.ForeignKey(
+        'users.Partner',
+        on_delete=models.CASCADE,
+        related_name='product_cost_histories',
+        null=True,
+        blank=True,
+        help_text='Partner/tenant this cost history belongs to'
+    )
     product = models.ForeignKey(
         Product,
         on_delete=models.PROTECT,
@@ -121,6 +128,7 @@ class ProductCostHistory(models.Model):
         indexes = [
             models.Index(fields=['product']),
             models.Index(fields=['-created_at']),
+            models.Index(fields=['partner']),
         ]
     
     def __str__(self):

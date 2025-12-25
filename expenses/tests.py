@@ -133,6 +133,13 @@ class TestExpenseCategoryListAPI:
         assert expense_category.name in names
         assert partner2_cat.name not in names
 
+    def test_super_admin_must_impersonate(self, super_admin_client):
+        """Super admin without impersonation cannot access tenant expense categories"""
+        response = super_admin_client.get('/api/expenses/categories/')
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert 'impersonate' in str(response.data.get('detail', '')).lower()
+
 
 @pytest.mark.django_db
 class TestExpenseCategoryCreateAPI:
