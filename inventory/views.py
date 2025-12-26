@@ -14,6 +14,8 @@ from .serializers import (
     ReceiveItemSerializer
 )
 from stock.models import StockTransaction
+from stores.utils import get_default_store
+from stores.models import Store
 from .barcode_utils import generate_product_label_pdf, generate_multiple_labels_pdf
 
 
@@ -170,6 +172,12 @@ def receive_po_items(request, po_id):
     """Receive items from a purchase order and update stock"""
     partner = require_partner_for_request(request)
     purchase_order = get_object_or_404(PurchaseOrder, id=po_id, partner=partner)
+    store = None
+    store_id = request.data.get('store_id')
+    if store_id:
+        store = get_object_or_404(Store, id=store_id, partner=partner) if partner else get_object_or_404(Store, id=store_id)
+    elif partner:
+        store = get_default_store(partner)
     
     if purchase_order.status == 'RECEIVED':
         return Response(
@@ -215,6 +223,7 @@ def receive_po_items(request, po_id):
             StockTransaction.objects.create(
                 product=product,
                 partner=partner,
+                store=store,
                 transaction_type='IN',
                 reason='PURCHASE',
                 quantity=received_qty,

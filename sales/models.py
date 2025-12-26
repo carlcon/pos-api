@@ -23,6 +23,14 @@ class Sale(models.Model):
         blank=True,
         help_text='Partner/tenant this sale belongs to'
     )
+    store = models.ForeignKey(
+        'stores.Store',
+        on_delete=models.SET_NULL,
+        related_name='sales',
+        null=True,
+        blank=True,
+        help_text='Store where this sale occurred'
+    )
     sale_number = models.CharField(max_length=50)
     customer_name = models.CharField(max_length=255, blank=True, null=True)
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, default='CASH')
@@ -58,6 +66,7 @@ class Sale(models.Model):
             models.Index(fields=['-created_at']),
             models.Index(fields=['cashier']),
             models.Index(fields=['partner']),
+            models.Index(fields=['store']),
         ]
         constraints = [
             models.UniqueConstraint(

@@ -24,6 +24,11 @@ class SaleListCreateView(PartnerFilterMixin, generics.ListCreateAPIView):
     def get_queryset(self):
         queryset = super().get_queryset()
         
+        # Filter by store
+        store_id = self.request.query_params.get('store_id')
+        if store_id:
+            queryset = queryset.filter(store_id=store_id)
+
         # Filter by date range
         start_date = self.request.query_params.get('start_date', None)
         end_date = self.request.query_params.get('end_date', None)
@@ -58,6 +63,7 @@ class SaleDetailView(PartnerFilterMixin, generics.RetrieveAPIView):
 def sales_summary(request):
     """Get sales summary statistics"""
     partner = require_partner_for_request(request)
+    store_id = request.query_params.get('store_id')
     
     # Get date filters
     period = request.query_params.get('period', 'today')  # today, week, month
@@ -75,6 +81,8 @@ def sales_summary(request):
     sales = Sale.objects.filter(created_at__gte=start_date)
     if partner:
         sales = sales.filter(partner=partner)
+    if store_id:
+        sales = sales.filter(store_id=store_id)
     
     total_sales = sales.aggregate(
         count=Count('id'),
@@ -95,6 +103,7 @@ def sales_summary(request):
 def top_selling_products(request):
     """Get top-selling products"""
     partner = require_partner_for_request(request)
+    store_id = request.query_params.get('store_id')
     
     limit = int(request.query_params.get('limit', 10))
     period = request.query_params.get('period', 'month')
@@ -110,6 +119,8 @@ def top_selling_products(request):
     queryset = SaleItem.objects.filter(sale__created_at__gte=start_date)
     if partner:
         queryset = queryset.filter(sale__partner=partner)
+    if store_id:
+        queryset = queryset.filter(sale__store_id=store_id)
     
     top_products = (
         queryset

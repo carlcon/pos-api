@@ -1,6 +1,9 @@
 from rest_framework import serializers
 from .models import Sale, SaleItem
 from inventory.serializers import ProductSerializer
+from stores.models import Store
+from stores.utils import get_default_store
+from users.mixins import get_partner_from_request
 
 
 class SaleItemSerializer(serializers.ModelSerializer):
@@ -27,25 +30,27 @@ class SaleItemCreateSerializer(serializers.ModelSerializer):
 class SaleSerializer(serializers.ModelSerializer):
     cashier_username = serializers.CharField(source='cashier.username', read_only=True)
     items = SaleItemSerializer(many=True, read_only=True)
+    store_name = serializers.CharField(source='store.name', read_only=True)
     
     class Meta:
         model = Sale
         fields = [
             'id', 'sale_number', 'customer_name', 'payment_method', 'is_wholesale',
             'subtotal', 'discount', 'total_amount', 'notes',
-            'cashier', 'cashier_username', 'items', 'created_at'
+            'cashier', 'cashier_username', 'store', 'store_name', 'items', 'created_at'
         ]
         read_only_fields = ['id', 'created_at', 'total_amount']
 
 
 class SaleCreateSerializer(serializers.ModelSerializer):
     items = SaleItemCreateSerializer(many=True)
+    store = serializers.PrimaryKeyRelatedField(required=False, allow_null=True, queryset=Store.objects.none())
     
     class Meta:
         model = Sale
         fields = [
             'sale_number', 'customer_name', 'payment_method', 'is_wholesale',
-            'subtotal', 'discount', 'notes', 'items'
+            'subtotal', 'discount', 'notes', 'items', 'store'
         ]
         extra_kwargs = {
             'sale_number': {'required': False},
@@ -58,6 +63,14 @@ class SaleCreateSerializer(serializers.ModelSerializer):
         if not data.get('items'):
             raise serializers.ValidationError({'items': 'At least one item is required'})
         return data
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        partner = get_partner_from_request(self.context.get('request')) if self.context.get('request') else None
+        if partner:
+            self.fields['store'].queryset = Store.objects.filter(partner=partner)
+        else:
+            self.fields['store'].queryset = Store.objects.all()
     
     def create(self, validated_data):
         from inventory.models import Product
@@ -68,6 +81,15 @@ class SaleCreateSerializer(serializers.ModelSerializer):
         
         items_data = validated_data.pop('items')
         validated_data['cashier'] = self.context['request'].user
+        partner = validated_data.get('partner')
+
+        # Resolve store: provided store must match partner; otherwise use default store if present
+        store = validated_data.pop('store', None)
+        if store and partner and store.partner_id != partner.id:
+            raise serializers.ValidationError({'store': 'Store does not belong to this partner.'})
+        if store is None and partner:
+            store = get_default_store(partner)
+        validated_data['store'] = store
         
         # Auto-generate sale_number if not provided
         if not validated_data.get('sale_number'):
@@ -127,6 +149,8 @@ class SaleCreateSerializer(serializers.ModelSerializer):
                 # Create stock transaction
                 StockTransaction.objects.create(
                     product=product,
+                    partner=partner,
+                    store=store,
                     transaction_type='OUT',
                     reason='SALE',
                     quantity=quantity,

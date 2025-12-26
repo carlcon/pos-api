@@ -12,6 +12,14 @@ class ExpenseCategory(models.Model):
         blank=True,
         help_text='Partner/tenant this expense category belongs to'
     )
+    store = models.ForeignKey(
+        'stores.Store',
+        on_delete=models.SET_NULL,
+        related_name='expense_categories',
+        null=True,
+        blank=True,
+        help_text='Optional store this category belongs to'
+    )
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True)
     color = models.CharField(max_length=7, default='#6366f1')  # Hex color for UI
@@ -24,8 +32,8 @@ class ExpenseCategory(models.Model):
         ordering = ['name']
         constraints = [
             models.UniqueConstraint(
-                fields=['partner', 'name'],
-                name='unique_expense_category_per_partner'
+                fields=['partner', 'store', 'name'],
+                name='unique_expense_category_per_partner_store'
             )
         ]
     
@@ -52,6 +60,14 @@ class Expense(models.Model):
         null=True,
         blank=True,
         help_text='Partner/tenant this expense belongs to'
+    )
+    store = models.ForeignKey(
+        'stores.Store',
+        on_delete=models.SET_NULL,
+        related_name='expenses',
+        null=True,
+        blank=True,
+        help_text='Store this expense is tied to (optional)'
     )
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)

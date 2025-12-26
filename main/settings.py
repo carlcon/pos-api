@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     'stock',
     'dashboard',
     'expenses',
+    'stores',
 ]
 
 # Custom User Model

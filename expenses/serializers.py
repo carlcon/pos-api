@@ -5,12 +5,13 @@ from .models import Expense, ExpenseCategory
 class ExpenseCategorySerializer(serializers.ModelSerializer):
     expense_count = serializers.SerializerMethodField()
     total_amount = serializers.SerializerMethodField()
+    store_name = serializers.CharField(source='store.name', read_only=True)
     
     class Meta:
         model = ExpenseCategory
         fields = [
             'id', 'name', 'description', 'color', 'is_active',
-            'expense_count', 'total_amount', 'created_at', 'updated_at'
+            'store', 'store_name', 'expense_count', 'total_amount', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_at', 'updated_at']
     
@@ -27,6 +28,7 @@ class ExpenseSerializer(serializers.ModelSerializer):
     category_color = serializers.CharField(source='category.color', read_only=True)
     payment_method_display = serializers.CharField(source='get_payment_method_display', read_only=True)
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)
+    store_name = serializers.CharField(source='store.name', read_only=True)
     
     class Meta:
         model = Expense
@@ -34,7 +36,7 @@ class ExpenseSerializer(serializers.ModelSerializer):
             'id', 'title', 'description', 'amount', 'category', 'category_name', 
             'category_color', 'payment_method', 'payment_method_display', 
             'expense_date', 'receipt_number', 'vendor', 'notes', 
-            'created_by', 'created_by_username', 'created_at', 'updated_at'
+            'created_by', 'created_by_username', 'store', 'store_name', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_by', 'created_at', 'updated_at']
 
@@ -44,7 +46,7 @@ class ExpenseCreateUpdateSerializer(serializers.ModelSerializer):
         model = Expense
         fields = [
             'title', 'description', 'amount', 'category', 'payment_method',
-            'expense_date', 'receipt_number', 'vendor', 'notes'
+            'expense_date', 'receipt_number', 'vendor', 'notes', 'store'
         ]
     
     def validate_amount(self, value):

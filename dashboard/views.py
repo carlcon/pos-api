@@ -28,6 +28,7 @@ def dashboard_stats(request):
     Get comprehensive dashboard statistics
     """
     partner = require_partner_for_request(request)
+    store_id = request.query_params.get('store_id')
     today = timezone.now().date()
     yesterday = today - timedelta(days=1)
     week_ago = today - timedelta(days=7)
@@ -38,6 +39,8 @@ def dashboard_stats(request):
     if partner:
         sales_qs = sales_qs.filter(partner=partner)
         products_qs = products_qs.filter(partner=partner)
+    if store_id:
+        sales_qs = sales_qs.filter(store_id=store_id)
     
     # Today's sales
     today_sales = sales_qs.filter(created_at__date=today).aggregate(
@@ -71,6 +74,8 @@ def dashboard_stats(request):
     sale_items_qs = SaleItem.objects.filter(sale__created_at__gte=thirty_days_ago)
     if partner:
         sale_items_qs = sale_items_qs.filter(sale__partner=partner)
+    if store_id:
+        sale_items_qs = sale_items_qs.filter(sale__store_id=store_id)
     top_products = sale_items_qs.values(
         'product__id',
         'product__name',
@@ -185,6 +190,7 @@ def daily_sales_report(request):
     from sales.models import SaleItem
     
     partner = require_partner_for_request(request)
+    store_id = request.query_params.get('store_id')
     
     date_str = request.query_params.get('date', timezone.now().date().isoformat())
     try:
@@ -195,6 +201,8 @@ def daily_sales_report(request):
     sales = Sale.objects.filter(created_at__date=report_date).select_related('cashier')
     if partner:
         sales = sales.filter(partner=partner)
+    if store_id:
+        sales = sales.filter(store_id=store_id)
     
     # Summary
     summary = sales.aggregate(
@@ -248,12 +256,15 @@ def daily_sales_report(request):
 def weekly_sales_report(request):
     """Get weekly sales summary"""
     partner = require_partner_for_request(request)
+    store_id = request.query_params.get('store_id')
     today = timezone.now().date()
     week_start = today - timedelta(days=today.weekday())
     
     sales_qs = Sale.objects.all()
     if partner:
         sales_qs = sales_qs.filter(partner=partner)
+    if store_id:
+        sales_qs = sales_qs.filter(store_id=store_id)
     
     weekly_data = []
     total_revenue = 0
@@ -298,6 +309,7 @@ def monthly_revenue_report(request):
     from sales.models import SaleItem
     
     partner = require_partner_for_request(request)
+    store_id = request.query_params.get('store_id')
     today = timezone.now().date()
     months_data = []
     
@@ -306,6 +318,9 @@ def monthly_revenue_report(request):
     if partner:
         sales_qs = sales_qs.filter(partner=partner)
         sale_items_qs = sale_items_qs.filter(sale__partner=partner)
+    if store_id:
+        sales_qs = sales_qs.filter(store_id=store_id)
+        sale_items_qs = sale_items_qs.filter(sale__store_id=store_id)
     
     for i in range(12):
         # Calculate month start
@@ -379,6 +394,7 @@ def monthly_revenue_report(request):
 def payment_breakdown_report(request):
     """Get payment method breakdown"""
     partner = require_partner_for_request(request)
+    store_id = request.query_params.get('store_id')
     date_str = request.query_params.get('date')
     period = request.query_params.get('period', 'today')  # today, week, month, all
     
@@ -400,6 +416,8 @@ def payment_breakdown_report(request):
     queryset = Sale.objects.all()
     if partner:
         queryset = queryset.filter(partner=partner)
+    if store_id:
+        queryset = queryset.filter(store_id=store_id)
     if start_date and end_date:
         queryset = queryset.filter(
             created_at__date__gte=start_date,
@@ -530,6 +548,7 @@ def low_stock_report(request):
 def stock_movement_report(request):
     """Get stock movement history report"""
     partner = require_partner_for_request(request)
+    store_id = request.query_params.get('store_id')
     days = int(request.query_params.get('days', 30))
     start_date = timezone.now().date() - timedelta(days=days)
     
@@ -540,6 +559,8 @@ def stock_movement_report(request):
     )
     if partner:
         transactions = transactions.filter(partner=partner)
+    if store_id:
+        transactions = transactions.filter(store_id=store_id)
     transactions = transactions.order_by('-created_at')
     
     # Group by type
@@ -632,6 +653,7 @@ def top_selling_report(request):
     from sales.models import SaleItem
     
     partner = require_partner_for_request(request)
+    store_id = request.query_params.get('store_id')
     days = int(request.query_params.get('days', 30))
     limit = int(request.query_params.get('limit', 20))
     start_date = timezone.now().date() - timedelta(days=days)
@@ -641,6 +663,8 @@ def top_selling_report(request):
     )
     if partner:
         top_products_qs = top_products_qs.filter(sale__partner=partner)
+    if store_id:
+        top_products_qs = top_products_qs.filter(sale__store_id=store_id)
     top_products = top_products_qs.values(
         'product__id',
         'product__name',
@@ -718,12 +742,15 @@ def products_by_category_report(request):
 def monthly_expenses_report(request):
     """Get monthly expenses analysis report"""
     partner = require_partner_for_request(request)
+    store_id = request.query_params.get('store_id')
     today = timezone.now().date()
     months_data = []
     
     expenses_qs = Expense.objects.all()
     if partner:
         expenses_qs = expenses_qs.filter(partner=partner)
+    if store_id:
+        expenses_qs = expenses_qs.filter(store_id=store_id)
     
     for i in range(12):
         # Calculate month start
@@ -778,12 +805,15 @@ def monthly_expenses_report(request):
 def expenses_by_category_report(request):
     """Get expenses breakdown by category"""
     partner = require_partner_for_request(request)
+    store_id = request.query_params.get('store_id')
     days = int(request.query_params.get('days', 30))
     start_date = timezone.now().date() - timedelta(days=days)
     
     expenses = Expense.objects.filter(expense_date__gte=start_date)
     if partner:
         expenses = expenses.filter(partner=partner)
+    if store_id:
+        expenses = expenses.filter(store_id=store_id)
     
     # By category
     by_category = expenses.values(
@@ -823,12 +853,15 @@ def expenses_by_category_report(request):
 def expenses_by_vendor_report(request):
     """Get expenses breakdown by vendor"""
     partner = require_partner_for_request(request)
+    store_id = request.query_params.get('store_id')
     days = int(request.query_params.get('days', 30))
     start_date = timezone.now().date() - timedelta(days=days)
     
     expenses_qs = Expense.objects.filter(expense_date__gte=start_date)
     if partner:
         expenses_qs = expenses_qs.filter(partner=partner)
+    if store_id:
+        expenses_qs = expenses_qs.filter(store_id=store_id)
     
     by_vendor = expenses_qs.exclude(
         vendor__isnull=True
@@ -865,6 +898,7 @@ def expenses_by_vendor_report(request):
 def expense_transactions_report(request):
     """Get detailed expense transactions report"""
     partner = require_partner_for_request(request)
+    store_id = request.query_params.get('store_id')
     days = int(request.query_params.get('days', 30))
     start_date = timezone.now().date() - timedelta(days=days)
     
@@ -875,11 +909,15 @@ def expense_transactions_report(request):
     )
     if partner:
         expenses_qs = expenses_qs.filter(partner=partner)
+    if store_id:
+        expenses_qs = expenses_qs.filter(store_id=store_id)
     expenses = expenses_qs.order_by('-expense_date', '-created_at')[:500]
     
     summary_qs = Expense.objects.filter(expense_date__gte=start_date)
     if partner:
         summary_qs = summary_qs.filter(partner=partner)
+    if store_id:
+        summary_qs = summary_qs.filter(store_id=store_id)
     summary = summary_qs.aggregate(
         total=Sum('amount'),
         count=Count('id')

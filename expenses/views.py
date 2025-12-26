@@ -1,4 +1,4 @@
-from rest_framework import viewsets, status, filters
+from rest_framework import viewsets, status, filters, serializers
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -8,6 +8,7 @@ from django.utils import timezone
 from datetime import timedelta
 
 from users.mixins import PartnerFilterViewSetMixin, require_partner_for_request
+from stores.utils import get_default_store
 from .models import Expense, ExpenseCategory
 from .serializers import (
     ExpenseSerializer, 
@@ -31,6 +32,9 @@ class ExpenseCategoryViewSet(PartnerFilterViewSetMixin, viewsets.ModelViewSet):
         is_active = self.request.query_params.get('is_active')
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
+        store_id = self.request.query_params.get('store_id')
+        if store_id:
+            queryset = queryset.filter(store_id=store_id)
         return queryset
 
 
@@ -69,12 +73,22 @@ class ExpenseViewSet(PartnerFilterViewSetMixin, viewsets.ModelViewSet):
             queryset = queryset.filter(amount__gte=min_amount)
         if max_amount:
             queryset = queryset.filter(amount__lte=max_amount)
+
+        store_id = self.request.query_params.get('store_id')
+        if store_id:
+            queryset = queryset.filter(store_id=store_id)
         
         return queryset
     
     def perform_create(self, serializer):
         partner = require_partner_for_request(self.request)
-        serializer.save(created_by=self.request.user, partner=partner)
+        store = serializer.validated_data.get('store') if hasattr(serializer, 'validated_data') else None
+        if store and partner and store.partner_id != partner.id:
+            raise serializers.ValidationError({'store': 'Store does not belong to this partner.'})
+        if store is None and partner:
+            store = get_default_store(partner)
+
+        serializer.save(created_by=self.request.user, partner=partner, store=store)
 
 
 @api_view(['GET'])
@@ -82,12 +96,15 @@ class ExpenseViewSet(PartnerFilterViewSetMixin, viewsets.ModelViewSet):
 def expense_stats(request):
     """Get expense statistics for dashboard"""
     partner = require_partner_for_request(request)
+    store_id = request.query_params.get('store_id')
     today = timezone.now().date()
     
     # Base queryset filtered by partner
     base_queryset = Expense.objects.all()
     if partner:
         base_queryset = base_queryset.filter(partner=partner)
+    if store_id:
+        base_queryset = base_queryset.filter(store_id=store_id)
     
     # Current month
     month_start = today.replace(day=1)

@@ -8,6 +8,8 @@ from decimal import Decimal
 from users.permissions import IsInventoryStaffOrAdmin
 from users.mixins import PartnerFilterMixin, require_partner_for_request
 from inventory.models import Product
+from stores.utils import get_default_store
+from stores.models import Store
 from .models import StockTransaction, ProductCostHistory
 from .serializers import (
     StockTransactionSerializer,
@@ -24,6 +26,11 @@ class StockTransactionListView(PartnerFilterMixin, generics.ListAPIView):
     
     def get_queryset(self):
         queryset = super().get_queryset()
+
+        # Filter by store
+        store_id = self.request.query_params.get('store_id')
+        if store_id:
+            queryset = queryset.filter(store_id=store_id)
         
         # Filter by product
         product_id = self.request.query_params.get('product', None)
@@ -65,6 +72,12 @@ def stock_adjustment(request):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     data = serializer.validated_data
+    store = None
+    store_id = data.get('store_id')
+    if store_id:
+        store = get_object_or_404(Store, id=store_id, partner=partner) if partner else get_object_or_404(Store, id=store_id)
+    elif partner:
+        store = get_default_store(partner)
     
     with transaction.atomic():
         # Get product (by ID or barcode)
@@ -133,6 +146,7 @@ def stock_adjustment(request):
         stock_transaction = StockTransaction.objects.create(
             product=product,
             partner=partner,
+            store=store,
             transaction_type=adjustment_type,
             reason=data['reason'],
             quantity=quantity,
@@ -153,7 +167,9 @@ def stock_adjustment(request):
                 new_cost=unit_cost,
                 stock_transaction=stock_transaction,
                 reason=f"Stock IN - {data['reason']}",
-                changed_by=request.user
+                changed_by=request.user,
+                partner=partner,
+                store=store,
             )
     
     return Response({
@@ -176,6 +192,10 @@ class ProductCostHistoryListView(PartnerFilterMixin, generics.ListAPIView):
         
         partner = require_partner_for_request(self.request)
         queryset = queryset.filter(product__partner=partner)
+
+        store_id = self.request.query_params.get('store_id')
+        if store_id:
+            queryset = queryset.filter(store_id=store_id)
         
         # Filter by product
         product_id = self.request.query_params.get('product', None)
