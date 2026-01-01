@@ -1,0 +1,54 @@
+{% extends "reports/base.html" %}
+
+{% block content %}
+    <!-- Summary Section -->
+    {% if summary %}
+    <div class="summary-grid">
+        {% for key, value in summary.items %}
+        <div class="summary-card">
+            <div class="label">{{ key|title }}</div>
+            <div class="value">{{ value }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    
+    <!-- Data Tables -->
+    {% for section_name, section_data in data_sections.items %}
+        {% if section_data %}
+        <h2 class="section-title">{{ section_name|title }}</h2>
+        <table>
+            <thead>
+                <tr>
+                    {% for header in section_data.0.keys %}
+                    <th>{{ header|title }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in section_data %}
+                <tr>
+                    {% for key, value in row.items %}
+                    <td>
+                        {% if key == 'status' %}
+                            {% if value == 'OK' %}
+                                <span class="badge badge-success">{{ value }}</span>
+                            {% elif value == 'Low Stock' %}
+                                <span class="badge badge-warning">{{ value }}</span>
+                            {% elif value == 'Out of Stock' %}
+                                <span class="badge badge-danger">{{ value }}</span>
+                            {% else %}
+                                {{ value }}
+                            {% endif %}
+                        {% else %}
+                            {{ value }}
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+    {% endfor %}
+{% endblock %}

@@ -26,6 +26,10 @@ app.conf.beat_schedule = {
         'task': 'notifications.tasks.cleanup_old_exports',
         'schedule': crontab(hour=2, minute=0),  # Run daily at 2 AM
     },
+    'cleanup-old-reports-daily': {
+        'task': 'dashboard.tasks.cleanup_old_reports',
+        'schedule': crontab(hour=2, minute=30),  # Run daily at 2:30 AM
+    },
 }
 
 

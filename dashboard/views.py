@@ -4,14 +4,53 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.db.models import Sum, Count, Q, F
 from django.utils import timezone
+from django.http import FileResponse, Http404, QueryDict
+from django.core.paginator import Paginator, EmptyPage
 from datetime import timedelta
 from decimal import Decimal
+from celery.result import AsyncResult
+import os
 
 from inventory.models import Product, StoreInventory
 from sales.models import Sale
 from stock.models import StockTransaction
 from expenses.models import Expense, ExpenseCategory
 from users.mixins import require_partner_for_request, get_store_id_from_request
+from .tasks import generate_report_pdf
+from django.conf import settings
+
+
+def paginate_data(data_list, request, data_key='data'):
+    """
+    Paginate data and return paginated response.
+    
+    Args:
+        data_list: List of items to paginate
+        request: Request object with page/page_size params
+        data_key: Key name for data array in response (default: 'data')
+    
+    Returns:
+        dict with pagination metadata
+    """
+    page_num = int(request.query_params.get('page', 1))
+    page_size = int(request.query_params.get('page_size', 10))
+    
+    paginator = Paginator(data_list, page_size)
+    
+    try:
+        page_obj = paginator.page(page_num)
+    except EmptyPage:
+        page_obj = paginator.page(paginator.num_pages)
+    
+    return {
+        data_key: list(page_obj),
+        'count': paginator.count,
+        'page': page_obj.number,
+        'page_size': page_size,
+        'total_pages': paginator.num_pages,
+        'has_next': page_obj.has_next(),
+        'has_previous': page_obj.has_previous(),
+    }
 
 
 def get_partner_filtered_queryset(model, request, partner_field='partner'):
@@ -246,6 +285,9 @@ def daily_sales_report(request):
         'cashier': s.cashier.username
     } for s in sales.order_by('-created_at')]
     
+    # Paginate transactions
+    pagination = paginate_data(transactions, request, 'data')
+    
     return Response({
         'report_type': 'Daily Sales Report',
         'date': report_date.isoformat(),
@@ -256,7 +298,7 @@ def daily_sales_report(request):
             'average_transaction': float(summary['total_revenue'] or 0) / max(summary['total_transactions'] or 1, 1)
         },
         'hourly_breakdown': hourly_sales,
-        'transactions': transactions
+        **pagination
     })
 
 
@@ -297,6 +339,9 @@ def weekly_sales_report(request):
             'count': day_count
         })
     
+    # Paginate daily breakdown
+    pagination = paginate_data(weekly_data, request, 'data')
+    
     return Response({
         'report_type': 'Weekly Sales Summary',
         'week_start': week_start.isoformat(),
@@ -307,7 +352,7 @@ def weekly_sales_report(request):
             'average_daily_revenue': total_revenue / 7,
             'average_daily_transactions': total_transactions / 7
         },
-        'daily_breakdown': weekly_data
+        **pagination
     })
 
 
@@ -381,6 +426,9 @@ def monthly_revenue_report(request):
     total_cost = sum(m['total_cost'] for m in months_data)
     total_gross_income = sum(m['gross_income'] for m in months_data)
     
+    # Paginate monthly breakdown
+    pagination = paginate_data(months_data, request, 'data')
+    
     return Response({
         'report_type': 'Monthly Revenue Analysis',
         'period': f'{months_data[0]["month"]} - {months_data[-1]["month"]}',
@@ -394,7 +442,7 @@ def monthly_revenue_report(request):
             'best_month': max(months_data, key=lambda x: x['total_revenue'])['month'],
             'best_month_revenue': max(m['total_revenue'] for m in months_data)
         },
-        'monthly_breakdown': months_data
+        **pagination
     })
 
 
@@ -440,6 +488,17 @@ def payment_breakdown_report(request):
     
     grand_total = sum(float(b['total'] or 0) for b in breakdown)
     
+    breakdown_list = [{
+        'payment_method': b['payment_method'],
+        'display_name': dict(Sale.PAYMENT_METHOD_CHOICES).get(b['payment_method'], b['payment_method']),
+        'total': float(b['total'] or 0),
+        'count': b['count'],
+        'percentage': (float(b['total'] or 0) / grand_total * 100) if grand_total > 0 else 0
+    } for b in breakdown]
+    
+    # Paginate breakdown
+    pagination = paginate_data(breakdown_list, request, 'data')
+    
     return Response({
         'report_type': 'Payment Method Breakdown',
         'period': period,
@@ -449,13 +508,7 @@ def payment_breakdown_report(request):
             'total_revenue': grand_total,
             'transaction_count': sum(b['count'] for b in breakdown)
         },
-        'breakdown': [{
-            'payment_method': b['payment_method'],
-            'display_name': dict(Sale.PAYMENT_METHOD_CHOICES).get(b['payment_method'], b['payment_method']),
-            'total': float(b['total'] or 0),
-            'count': b['count'],
-            'percentage': (float(b['total'] or 0) / grand_total * 100) if grand_total > 0 else 0
-        } for b in breakdown]
+        **pagination
     })
 
 
@@ -501,6 +554,9 @@ def stock_levels_report(request):
         total_value=Sum(F('current_stock') * F('product__cost_price'))
     )
     
+    # Paginate products
+    pagination = paginate_data(stock_data, request, 'data')
+    
     return Response({
         'report_type': 'Stock Levels Report',
         'generated_at': timezone.now().isoformat(),
@@ -511,7 +567,7 @@ def stock_levels_report(request):
             'low_stock_count': len([p for p in stock_data if p['status'] == 'Low Stock']),
             'out_of_stock_count': len([p for p in stock_data if p['status'] == 'Out of Stock'])
         },
-        'products': stock_data
+        **pagination
     })
 
 
@@ -547,6 +603,9 @@ def low_stock_report(request):
         'store_name': inv.store.name if inv.store else 'N/A'
     } for inv in inventory_qs]
     
+    # Paginate items
+    pagination = paginate_data(low_stock_items, request, 'data')
+    
     return Response({
         'report_type': 'Low Stock Alert Report',
         'generated_at': timezone.now().isoformat(),
@@ -555,7 +614,7 @@ def low_stock_report(request):
             'out_of_stock_count': len([i for i in low_stock_items if i['is_out_of_stock']]),
             'total_reorder_cost': sum(i['reorder_cost'] for i in low_stock_items)
         },
-        'items': low_stock_items
+        **pagination
     })
 
 
@@ -598,7 +657,10 @@ def stock_movement_report(request):
         'reference_number': t.reference_number or '',
         'performed_by': t.performed_by.username,
         'notes': t.notes or ''
-    } for t in transactions[:500]]  # Limit to 500 records
+    } for t in transactions]
+    
+    # Paginate movements
+    pagination = paginate_data(movement_data, request, 'data')
     
     return Response({
         'report_type': 'Stock Movement History',
@@ -606,10 +668,10 @@ def stock_movement_report(request):
         'start_date': start_date.isoformat(),
         'end_date': timezone.now().date().isoformat(),
         'summary': {
-            'total_transactions': transactions.count(),
+            'total_transactions': len(movement_data),
             'by_type': {s['transaction_type']: {'count': s['count'], 'quantity': s['total_quantity']} for s in summary}
         },
-        'movements': movement_data
+        **pagination
     })
 
 
@@ -620,14 +682,21 @@ def inventory_valuation_report(request):
     from inventory.models import Category
     
     partner = require_partner_for_request(request)
-    products = Product.objects.select_related('category').filter(is_active=True)
+    store_id = get_store_id_from_request(request)
+    
+    # Get store inventories instead of products directly
+    inventory_qs = StoreInventory.objects.select_related('product', 'product__category').filter(
+        product__is_active=True
+    )
     if partner:
-        products = products.filter(partner=partner)
+        inventory_qs = inventory_qs.filter(product__partner=partner)
+    if store_id:
+        inventory_qs = inventory_qs.filter(store_id=store_id)
     
     # Group by category
     category_data = {}
-    for p in products:
-        cat_name = p.category.name if p.category else 'Uncategorized'
+    for inv in inventory_qs:
+        cat_name = inv.product.category.name if inv.product.category else 'Uncategorized'
         if cat_name not in category_data:
             category_data[cat_name] = {
                 'category': cat_name,
@@ -638,27 +707,31 @@ def inventory_valuation_report(request):
             }
         
         category_data[cat_name]['product_count'] += 1
-        category_data[cat_name]['total_units'] += p.current_stock
-        category_data[cat_name]['cost_value'] += float(p.current_stock * p.cost_price)
-        category_data[cat_name]['retail_value'] += float(p.current_stock * p.selling_price)
+        category_data[cat_name]['total_units'] += inv.current_stock
+        category_data[cat_name]['cost_value'] += float(inv.current_stock * inv.product.cost_price)
+        category_data[cat_name]['retail_value'] += float(inv.current_stock * inv.product.selling_price)
     
     categories = list(category_data.values())
     
     total_cost = sum(c['cost_value'] for c in categories)
     total_retail = sum(c['retail_value'] for c in categories)
     
+    # Sort and paginate categories
+    sorted_categories = sorted(categories, key=lambda x: x['cost_value'], reverse=True)
+    pagination = paginate_data(sorted_categories, request, 'data')
+    
     return Response({
         'report_type': 'Inventory Valuation Report',
         'generated_at': timezone.now().isoformat(),
         'summary': {
-            'total_products': products.count(),
+            'total_products': len(set(inv.product.id for inv in inventory_qs)),
             'total_units': sum(c['total_units'] for c in categories),
             'total_cost_value': total_cost,
             'total_retail_value': total_retail,
             'potential_profit': total_retail - total_cost,
             'average_margin_percentage': ((total_retail - total_cost) / total_cost * 100) if total_cost > 0 else 0
         },
-        'by_category': sorted(categories, key=lambda x: x['cost_value'], reverse=True)
+        **pagination
     })
 
 
@@ -690,7 +763,21 @@ def top_selling_report(request):
         total_quantity=Sum('quantity'),
         total_revenue=Sum('line_total'),
         transaction_count=Count('id')
-    ).order_by('-total_revenue')[:limit]
+    ).order_by('-total_revenue')
+    
+    products_list = [{
+        'rank': i + 1,
+        'id': p['product__id'],
+        'name': p['product__name'],
+        'sku': p['product__sku'],
+        'category': p['product__category__name'] or 'Uncategorized',
+        'quantity_sold': p['total_quantity'],
+        'revenue': float(p['total_revenue'] or 0),
+        'transaction_count': p['transaction_count']
+    } for i, p in enumerate(top_products)]
+    
+    # Paginate products
+    pagination = paginate_data(products_list, request, 'data')
     
     return Response({
         'report_type': 'Top Selling Products',
@@ -698,20 +785,11 @@ def top_selling_report(request):
         'start_date': start_date.isoformat(),
         'end_date': timezone.now().date().isoformat(),
         'summary': {
-            'total_products_sold': len(top_products),
-            'total_revenue': sum(float(p['total_revenue'] or 0) for p in top_products),
-            'total_units_sold': sum(p['total_quantity'] or 0 for p in top_products)
+            'total_products_sold': len(products_list),
+            'total_revenue': sum(p['revenue'] for p in products_list),
+            'total_units_sold': sum(p['quantity_sold'] for p in products_list)
         },
-        'products': [{
-            'rank': i + 1,
-            'id': p['product__id'],
-            'name': p['product__name'],
-            'sku': p['product__sku'],
-            'category': p['product__category__name'] or 'Uncategorized',
-            'quantity_sold': p['total_quantity'],
-            'revenue': float(p['total_revenue'] or 0),
-            'transaction_count': p['transaction_count']
-        } for i, p in enumerate(top_products)]
+        **pagination
     })
 
 
@@ -722,34 +800,53 @@ def products_by_category_report(request):
     from inventory.models import Category
     
     partner = require_partner_for_request(request)
+    store_id = get_store_id_from_request(request)
+    
     categories = Category.objects.all()
     if partner:
         categories = categories.filter(partner=partner)
-    categories = categories.annotate(
-        product_count=Count('products', filter=Q(products__is_active=True)),
-        total_stock=Sum('products__current_stock', filter=Q(products__is_active=True)),
-        stock_value=Sum(
-            F('products__current_stock') * F('products__cost_price'),
-            filter=Q(products__is_active=True)
-        )
-    ).order_by('-product_count')
+    
+    category_data = []
+    for category in categories:
+        # Get products in this category
+        products = Product.objects.filter(category=category, is_active=True)
+        if partner:
+            products = products.filter(partner=partner)
+        
+        # Get inventory for these products
+        inventory_qs = StoreInventory.objects.filter(product__in=products)
+        if store_id:
+            inventory_qs = inventory_qs.filter(store_id=store_id)
+        
+        product_count = products.count()
+        total_stock = sum(inv.current_stock for inv in inventory_qs)
+        stock_value = sum(float(inv.current_stock * inv.product.cost_price) for inv in inventory_qs)
+        
+        if product_count > 0:  # Only include categories with products
+            category_data.append({
+                'id': category.id,
+                'name': category.name,
+                'description': category.description or '',
+                'product_count': product_count,
+                'total_stock': total_stock,
+                'stock_value': stock_value
+            })
+    
+    # Sort by product count descending
+    category_data.sort(key=lambda x: x['product_count'], reverse=True)
+    
+    # Paginate categories
+    pagination = paginate_data(category_data, request, 'data')
     
     return Response({
         'report_type': 'Products by Category',
         'generated_at': timezone.now().isoformat(),
         'summary': {
-            'total_categories': categories.count(),
-            'total_products': sum(c.product_count for c in categories),
-            'total_stock_value': sum(float(c.stock_value or 0) for c in categories)
+            'total_categories': len(category_data),
+            'total_products': sum(c['product_count'] for c in category_data),
+            'total_stock_value': sum(c['stock_value'] for c in category_data)
         },
-        'categories': [{
-            'id': c.id,
-            'name': c.name,
-            'description': c.description or '',
-            'product_count': c.product_count,
-            'total_stock': c.total_stock or 0,
-            'stock_value': float(c.stock_value or 0)
-        } for c in categories]
+        **pagination
     })
 
 
@@ -801,6 +898,9 @@ def monthly_expenses_report(request):
     
     total_expenses = sum(m['total_expenses'] for m in months_data)
     
+    # Paginate monthly breakdown
+    pagination = paginate_data(months_data, request, 'data')
+    
     return Response({
         'report_type': 'Monthly Expenses Analysis',
         'period': f'{months_data[0]["month"]} - {months_data[-1]["month"]}',
@@ -812,7 +912,7 @@ def monthly_expenses_report(request):
             'lowest_month': min(months_data, key=lambda x: x['total_expenses'])['month'],
             'lowest_month_amount': min(m['total_expenses'] for m in months_data)
         },
-        'monthly_breakdown': months_data
+        **pagination
     })
 
 
@@ -843,6 +943,18 @@ def expenses_by_category_report(request):
     
     total_amount = sum(float(c['total'] or 0) for c in by_category)
     
+    categories_list = [{
+        'id': c['category__id'],
+        'name': c['category__name'] or 'Uncategorized',
+        'color': c['category__color'] or '#6366f1',
+        'total': float(c['total'] or 0),
+        'count': c['count'],
+        'percentage': round((float(c['total'] or 0) / total_amount * 100), 2) if total_amount > 0 else 0
+    } for c in by_category]
+    
+    # Paginate categories
+    pagination = paginate_data(categories_list, request, 'data')
+    
     return Response({
         'report_type': 'Expenses by Category',
         'period': f'Last {days} days',
@@ -850,17 +962,10 @@ def expenses_by_category_report(request):
         'end_date': timezone.now().date().isoformat(),
         'summary': {
             'total_expenses': total_amount,
-            'total_categories': len(by_category),
-            'total_transactions': sum(c['count'] for c in by_category)
+            'total_categories': len(categories_list),
+            'total_transactions': sum(c['count'] for c in categories_list)
         },
-        'categories': [{
-            'id': c['category__id'],
-            'name': c['category__name'] or 'Uncategorized',
-            'color': c['category__color'] or '#6366f1',
-            'total': float(c['total'] or 0),
-            'count': c['count'],
-            'percentage': round((float(c['total'] or 0) / total_amount * 100), 2) if total_amount > 0 else 0
-        } for c in by_category]
+        **pagination
     })
 
 
@@ -886,9 +991,19 @@ def expenses_by_vendor_report(request):
     ).values('vendor').annotate(
         total=Sum('amount'),
         count=Count('id')
-    ).order_by('-total')[:20]
+    ).order_by('-total')
     
     total_amount = sum(float(v['total'] or 0) for v in by_vendor)
+    
+    vendors_list = [{
+        'name': v['vendor'],
+        'total': float(v['total'] or 0),
+        'count': v['count'],
+        'percentage': round((float(v['total'] or 0) / total_amount * 100), 2) if total_amount > 0 else 0
+    } for v in by_vendor]
+    
+    # Paginate vendors
+    pagination = paginate_data(vendors_list, request, 'data')
     
     return Response({
         'report_type': 'Expenses by Vendor',
@@ -897,15 +1012,10 @@ def expenses_by_vendor_report(request):
         'end_date': timezone.now().date().isoformat(),
         'summary': {
             'total_expenses': total_amount,
-            'total_vendors': len(by_vendor),
-            'total_transactions': sum(v['count'] for v in by_vendor)
+            'total_vendors': len(vendors_list),
+            'total_transactions': sum(v['count'] for v in vendors_list)
         },
-        'vendors': [{
-            'name': v['vendor'],
-            'total': float(v['total'] or 0),
-            'count': v['count'],
-            'percentage': round((float(v['total'] or 0) / total_amount * 100), 2) if total_amount > 0 else 0
-        } for v in by_vendor]
+        **pagination
     })
 
 
@@ -927,7 +1037,7 @@ def expense_transactions_report(request):
         expenses_qs = expenses_qs.filter(partner=partner)
     if store_id:
         expenses_qs = expenses_qs.filter(store_id=store_id)
-    expenses = expenses_qs.order_by('-expense_date', '-created_at')[:500]
+    expenses = expenses_qs.order_by('-expense_date', '-created_at')
     
     summary_qs = Expense.objects.filter(expense_date__gte=start_date)
     if partner:
@@ -939,6 +1049,22 @@ def expense_transactions_report(request):
         count=Count('id')
     )
     
+    transactions_list = [{
+        'id': e.id,
+        'date': e.expense_date.isoformat(),
+        'title': e.title,
+        'description': e.description or '',
+        'category': e.category.name if e.category else 'Uncategorized',
+        'vendor': e.vendor or '-',
+        'payment_method': e.get_payment_method_display(),
+        'amount': float(e.amount),
+        'receipt_number': e.receipt_number or '-',
+        'created_by': e.created_by.username
+    } for e in expenses]
+    
+    # Paginate transactions
+    pagination = paginate_data(transactions_list, request, 'data')
+    
     return Response({
         'report_type': 'Expense Transactions Report',
         'period': f'Last {days} days',
@@ -949,16 +1075,179 @@ def expense_transactions_report(request):
             'total_transactions': summary['count'] or 0,
             'average_expense': float(summary['total'] or 0) / max(summary['count'] or 1, 1)
         },
-        'transactions': [{
-            'id': e.id,
-            'date': e.expense_date.isoformat(),
-            'title': e.title,
-            'description': e.description or '',
-            'category': e.category.name if e.category else 'Uncategorized',
-            'vendor': e.vendor or '-',
-            'payment_method': e.get_payment_method_display(),
-            'amount': float(e.amount),
-            'receipt_number': e.receipt_number or '-',
-            'created_by': e.created_by.username
-        } for e in expenses]
+        **pagination
     })
+
+
+# ============================================================================
+# NEW ASYNC REPORT GENERATION ENDPOINTS
+# ============================================================================
+
+REPORT_VIEW_MAP = {
+    'daily-sales': daily_sales_report,
+    'weekly-sales': weekly_sales_report,
+    'monthly-revenue': monthly_revenue_report,
+    'payment-breakdown': payment_breakdown_report,
+    'stock-levels': stock_levels_report,
+    'low-stock': low_stock_report,
+    'stock-movement': stock_movement_report,
+    'inventory-valuation': inventory_valuation_report,
+    'top-selling': top_selling_report,
+    'products-by-category': products_by_category_report,
+    'monthly-expenses': monthly_expenses_report,
+    'expenses-by-category': expenses_by_category_report,
+    'expenses-by-vendor': expenses_by_vendor_report,
+    'expense-transactions': expense_transactions_report,
+}
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def generate_report(request):
+    """
+    Initiate async report generation.
+    
+    POST /api/dashboard/reports/generate/
+    Body: {
+        "report_type": "daily-sales",
+        "format": "pdf",  # or "csv"
+        "store_id": 1  # optional
+    }
+    
+    Returns: {
+        "task_id": "abc-123",
+        "status": "pending"
+    }
+    """
+    report_type = request.data.get('report_type')
+    format_type = request.data.get('format', 'pdf')
+    
+    if report_type not in REPORT_VIEW_MAP:
+        return Response({
+            'error': f'Invalid report type. Valid types: {list(REPORT_VIEW_MAP.keys())}'
+        }, status=400)
+    
+    # Get report data from existing view
+    view_func = REPORT_VIEW_MAP[report_type]
+    
+    # Create a mock request with query params for the view
+    from rest_framework.request import Request
+    from django.http import HttpRequest
+    
+    mock_http_request = HttpRequest()
+    mock_http_request.method = 'GET'
+    mock_http_request.user = request.user
+    mock_http_request.GET = QueryDict(mutable=True)
+    
+    # Add store_id from body if provided
+    if 'store_id' in request.data:
+        mock_http_request.GET['store_id'] = str(request.data['store_id'])
+    
+    mock_request = Request(mock_http_request)
+    mock_request.user = request.user
+    
+    # Get report data
+    response = view_func(mock_request)
+    report_data = response.data
+    
+    if format_type == 'csv':
+        # Return data directly for CSV export (handled by frontend)
+        return Response({
+            'format': 'csv',
+            'data': report_data
+        })
+    
+    # For PDF, start async task
+    partner_id = request.user.partner.id if hasattr(request.user, 'partner') and request.user.partner else None
+    store_id = request.data.get('store_id')
+    
+    task = generate_report_pdf.delay(
+        report_type=report_type,
+        report_data=report_data,
+        partner_id=partner_id,
+        store_id=store_id
+    )
+    
+    return Response({
+        'task_id': task.id,
+        'status': 'pending',
+        'format': 'pdf'
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def report_status(request, task_id):
+    """
+    Check status of report generation task.
+    
+    GET /api/dashboard/reports/status/<task_id>/
+    
+    Returns: {
+        "status": "pending|processing|completed|failed",
+        "file_url": "...",  # if completed
+        "filename": "...",   # if completed
+        "error": "..."       # if failed
+    }
+    """
+    task = AsyncResult(task_id)
+    
+    if task.state == 'PENDING':
+        response = {
+            'status': 'pending',
+            'message': 'Task is waiting to start...'
+        }
+    elif task.state == 'PROCESSING':
+        response = {
+            'status': 'processing',
+            'message': task.info.get('status', 'Generating report...')
+        }
+    elif task.state == 'SUCCESS':
+        result = task.result
+        file_url = f"{settings.MEDIA_URL}{result['file_path']}"
+        response = {
+            'status': 'completed',
+            'file_url': file_url,
+            'filename': result['filename'],
+            'download_url': f'/api/dashboard/reports/download/{result["filename"]}/'
+        }
+    elif task.state == 'FAILURE':
+        response = {
+            'status': 'failed',
+            'error': str(task.info)
+        }
+    else:
+        response = {
+            'status': task.state.lower(),
+            'message': str(task.info)
+        }
+    
+    return Response(response)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def download_report(request, filename):
+    """
+    Download generated report PDF.
+    
+    GET /api/dashboard/reports/download/<filename>/
+    """
+    # Security: ensure filename is safe
+    if '..' in filename or '/' in filename:
+        raise Http404("Invalid filename")
+    
+    file_path = os.path.join(settings.MEDIA_ROOT, 'reports', filename)
+    
+    if not os.path.exists(file_path):
+        raise Http404("Report not found")
+    
+    # Optional: Add permission check to ensure user can access this report
+    # For now, any authenticated user can download
+    
+    return FileResponse(
+        open(file_path, 'rb'),
+        as_attachment=True,
+        filename=filename,
+        content_type='application/pdf'
+    )

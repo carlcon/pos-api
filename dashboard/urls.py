@@ -5,6 +5,13 @@ app_name = 'dashboard'
 
 urlpatterns = [
     path('stats/', views.dashboard_stats, name='stats'),
+    
+    # New async report endpoints
+    path('reports/generate/', views.generate_report, name='generate-report'),
+    path('reports/status/<str:task_id>/', views.report_status, name='report-status'),
+    path('reports/download/<str:filename>/', views.download_report, name='download-report'),
+    
+    # Legacy JSON report endpoints (keep for CSV export)
     path('reports/daily-sales/', views.daily_sales_report, name='daily-sales-report'),
     path('reports/weekly-sales/', views.weekly_sales_report, name='weekly-sales-report'),
     path('reports/monthly-revenue/', views.monthly_revenue_report, name='monthly-revenue-report'),

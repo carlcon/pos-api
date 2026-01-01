@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>{{ report_title }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 1cm;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 10pt;
+            color: #333;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .header {
+            border-bottom: 3px solid #2563eb;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 20pt;
+            color: #1e40af;
+        }
+        
+        .header .subtitle {
+            margin: 5px 0 0 0;
+            font-size: 9pt;
+            color: #6b7280;
+        }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        
+        .summary-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 12px;
+            background: #f9fafb;
+        }
+        
+        .summary-card .label {
+            font-size: 8pt;
+            color: #6b7280;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+        
+        .summary-card .value {
+            font-size: 14pt;
+            font-weight: bold;
+            color: #111827;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+            font-size: 9pt;
+        }
+        
+        thead {
+            background: #f3f4f6;
+        }
+        
+        th {
+            text-align: left;
+            padding: 8px;
+            font-weight: 600;
+            border: 1px solid #d1d5db;
+            color: #374151;
+        }
+        
+        td {
+            padding: 6px 8px;
+            border: 1px solid #e5e7eb;
+        }
+        
+        tbody tr:nth-child(even) {
+            background: #f9fafb;
+        }
+        
+        .section-title {
+            font-size: 12pt;
+            font-weight: 600;
+            margin: 20px 0 10px 0;
+            color: #1f2937;
+            border-bottom: 2px solid #e5e7eb;
+            padding-bottom: 5px;
+        }
+        
+        .text-right {
+            text-align: right;
+        }
+        
+        .text-center {
+            text-align: center;
+        }
+        
+        .text-success {
+            color: #10b981;
+            font-weight: 600;
+        }
+        
+        .text-warning {
+            color: #f59e0b;
+            font-weight: 600;
+        }
+        
+        .text-danger {
+            color: #ef4444;
+            font-weight: 600;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 8pt;
+            font-weight: 600;
+        }
+        
+        .badge-success {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        
+        .badge-warning {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .badge-danger {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .footer {
+            margin-top: 30px;
+            padding-top: 10px;
+            border-top: 1px solid #e5e7eb;
+            font-size: 8pt;
+            color: #9ca3af;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>{{ report_title }}</h1>
+        <p class="subtitle">Generated on {{ generated_at }}</p>
+        {% if period %}<p class="subtitle">Period: {{ period }}</p>{% endif %}
+    </div>
+    
+    {% block content %}{% endblock %}
+    
+    <div class="footer">
+        <p>This is a system-generated report. For questions, please contact your administrator.</p>
+    </div>
+</body>
+</html>

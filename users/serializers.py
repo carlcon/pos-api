@@ -26,9 +26,19 @@ class PartnerMinimalSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'code']
 
 
+class StoreMinimalSerializer(serializers.ModelSerializer):
+    """Minimal serializer for Store (used in nested representations)"""
+    
+    class Meta:
+        from stores.models import Store
+        model = Store
+        fields = ['id', 'name', 'code']
+
+
 class UserSerializer(serializers.ModelSerializer):
     """Serializer for User model"""
     partner = PartnerMinimalSerializer(read_only=True)
+    assigned_store = StoreMinimalSerializer(read_only=True)
     partner_id = serializers.PrimaryKeyRelatedField(
         queryset=Partner.objects.all(),
         source='partner',
@@ -43,7 +53,7 @@ class UserSerializer(serializers.ModelSerializer):
             'id', 'username', 'email', 'first_name', 'last_name',
             'role', 'phone', 'employee_id', 'is_active_employee',
             'is_active', 'is_super_admin', 'partner', 'partner_id',
-            'date_joined', 'last_login'
+            'assigned_store', 'date_joined', 'last_login'
         ]
         read_only_fields = ['id', 'date_joined', 'last_login']
 
