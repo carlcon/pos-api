@@ -1130,25 +1130,48 @@ def generate_report(request):
     # Get report data from existing view
     view_func = REPORT_VIEW_MAP[report_type]
     
-    # Create a mock request with query params for the view
-    from rest_framework.request import Request
-    from django.http import HttpRequest
+    # Create a mock GET request using DRF's APIRequestFactory
+    from rest_framework.test import APIRequestFactory
     
-    mock_http_request = HttpRequest()
-    mock_http_request.method = 'GET'
-    mock_http_request.user = request.user
-    mock_http_request.GET = QueryDict(mutable=True)
+    factory = APIRequestFactory()
     
-    # Add store_id from body if provided
+    # Build query params from request data
+    query_params = {}
     if 'store_id' in request.data:
-        mock_http_request.GET['store_id'] = str(request.data['store_id'])
+        query_params['store_id'] = str(request.data['store_id'])
+    if 'date' in request.data:
+        query_params['date'] = str(request.data['date'])
+    if 'date_from' in request.data:
+        query_params['date_from'] = str(request.data['date_from'])
+    if 'date_to' in request.data:
+        query_params['date_to'] = str(request.data['date_to'])
+    if 'days' in request.data:
+        query_params['days'] = str(request.data['days'])
+    if 'period' in request.data:
+        query_params['period'] = str(request.data['period'])
+    if 'limit' in request.data:
+        query_params['limit'] = str(request.data['limit'])
+    if 'category_id' in request.data:
+        query_params['category_id'] = str(request.data['category_id'])
+    if 'vendor' in request.data:
+        query_params['vendor'] = str(request.data['vendor'])
+    # Don't pass pagination for PDF - get all data
+    query_params['page_size'] = '1000'
     
-    mock_request = Request(mock_http_request)
+    # Create the mock request
+    query_string = '&'.join(f'{k}={v}' for k, v in query_params.items())
+    mock_request = factory.get(f'/fake-endpoint/?{query_string}')
+    
+    # Copy auth from original request - APIRequestFactory requests work with DRF views
     mock_request.user = request.user
+    # Force authentication to pass through
+    mock_request._force_auth_user = request.user
+    mock_request._force_auth_token = getattr(request, 'auth', None)
     
-    # Get report data
+    # Get report data by calling the view function
     response = view_func(mock_request)
-    report_data = response.data
+    # Convert to plain dict for Celery serialization
+    report_data = dict(response.data)
     
     if format_type == 'csv':
         # Return data directly for CSV export (handled by frontend)

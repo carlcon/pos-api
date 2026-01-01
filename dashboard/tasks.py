@@ -7,7 +7,6 @@ from celery import shared_task
 from django.template.loader import render_to_string
 from django.conf import settings
 from weasyprint import HTML
-import tempfile
 
 
 @shared_task(bind=True)
@@ -28,13 +27,28 @@ def generate_report_pdf(self, report_type, report_data, partner_id=None, store_i
         # Update task state
         self.update_state(state='PROCESSING', meta={'status': 'Generating PDF...'})
         
+        # Debug: print received data
+        print(f"=== PDF Generation Debug ===")
+        print(f"report_type: {report_type}")
+        print(f"report_data keys: {report_data.keys() if report_data else 'None'}")
+        print(f"report_data: {report_data}")
+        
         # Prepare template context
+        summary = format_summary(report_data.get('summary', {}))
+        data_sections = extract_data_sections(report_data)
+        
+        print(f"=== Formatted context ===")
+        print(f"summary: {summary}")
+        print(f"data_sections keys: {data_sections.keys() if data_sections else 'None'}")
+        print(f"data_sections: {data_sections}")
+        
         context = {
             'report_title': report_data.get('report_type', 'Report'),
             'generated_at': datetime.now().strftime('%B %d, %Y at %I:%M %p'),
             'period': report_data.get('period'),
-            'summary': format_summary(report_data.get('summary', {})),
-            'data_sections': extract_data_sections(report_data),
+            'date': report_data.get('date'),
+            'summary': summary,
+            'data_sections': data_sections,
         }
         
         # Render HTML template
@@ -98,7 +112,8 @@ def extract_data_sections(report_data):
     sections = {}
     
     # Skip metadata keys
-    skip_keys = {'report_type', 'generated_at', 'summary', 'period', 'start_date', 'end_date'}
+    skip_keys = {'report_type', 'generated_at', 'summary', 'period', 'start_date', 'end_date',
+                 'date', 'count', 'page', 'page_size', 'total_pages', 'has_next', 'has_previous'}
     
     for key, value in report_data.items():
         if key in skip_keys:
@@ -107,7 +122,7 @@ def extract_data_sections(report_data):
         if isinstance(value, list) and len(value) > 0:
             # Format list data
             formatted_items = []
-            for item in value[:50]:  # Limit to 50 items for PDF
+            for item in value[:100]:  # Limit to 100 items for PDF
                 formatted_item = {}
                 for item_key, item_value in item.items():
                     # Skip IDs in display (except if it's the only 'id' field)
@@ -133,7 +148,7 @@ def extract_data_sections(report_data):
                 formatted_items.append(formatted_item)
             
             if formatted_items:
-                sections[key.replace('_', ' ')] = formatted_items
+                sections[key.replace('_', ' ').title()] = formatted_items
     
     return sections
 
