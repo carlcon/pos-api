@@ -47,25 +47,36 @@ class IsAdminOrSuperAdmin(permissions.BasePermission):
 
 
 class IsInventoryStaffOrAdmin(permissions.BasePermission):
-    """Inventory Staff and Admin have access"""
+    """Inventory Staff, Store Admin, and Admin have access"""
     
     def has_permission(self, request, view):
-        return (
-            request.user and 
-            request.user.is_authenticated and 
-            request.user.role in [User.Role.ADMIN, User.Role.INVENTORY_STAFF]
-        )
+        if not request.user or not request.user.is_authenticated:
+            return False
+        
+        # Super admin always has access
+        if request.user.is_super_admin:
+            return True
+        
+        return request.user.role in [
+            User.Role.ADMIN, User.Role.STORE_ADMIN, User.Role.INVENTORY_STAFF
+        ]
 
 
 class IsCashierOrAbove(permissions.BasePermission):
-    """Cashier, Inventory Staff, and Admin have access"""
+    """Cashier, Store Admin, Inventory Staff, and Admin have access"""
     
     def has_permission(self, request, view):
-        return (
-            request.user and 
-            request.user.is_authenticated and 
-            request.user.role in [User.Role.ADMIN, User.Role.INVENTORY_STAFF, User.Role.CASHIER]
-        )
+        if not request.user or not request.user.is_authenticated:
+            return False
+        
+        # Super admin always has access
+        if request.user.is_super_admin:
+            return True
+        
+        return request.user.role in [
+            User.Role.ADMIN, User.Role.STORE_ADMIN,
+            User.Role.INVENTORY_STAFF, User.Role.CASHIER
+        ]
 
 
 class CanAccessPOS(permissions.BasePermission):
