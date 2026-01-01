@@ -139,21 +139,23 @@ jobs:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          # Save SSH key
-          echo "$EC2_SSH_KEY" | tr -d '[: space:]' | base64 -d > ec2_key.pem
+          # Save SSH key - remove any whitespace/newlines that GitHub might have added
+          printf '%s' "$EC2_SSH_KEY" | base64 -d > ec2_key.pem
           chmod 600 ec2_key.pem
           
           # SSH to EC2 and deploy
-          ssh -o StrictHostKeyChecking=no -i ec2_key.pem ec2-user@$EC2_HOST << 'ENDSSH'
+          ssh -o StrictHostKeyChecking=no -i ec2_key.pem ec2-user@$EC2_HOST << EOF
             cd /opt/pos-app
             
             # Login to ECR
-            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}
+            aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
             
             # Pull latest images
-            export ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}
-            export IMAGE_TAG=${{ env.IMAGE_TAG }}
+            export ECR_REGISTRY=${ECR_REGISTRY}
+            export IMAGE_TAG=${IMAGE_TAG}
             
             docker-compose -f docker-compose.prod.yml pull api celery celery-beat
             
@@ -170,7 +172,7 @@ jobs:
             docker image prune -f
             
             echo "Deployment completed successfully!"
-          ENDSSH
+          EOF
           
           # Clean up
           rm -f ec2_key.pem
