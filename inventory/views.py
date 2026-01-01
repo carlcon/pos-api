@@ -3,15 +3,15 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
-from django.db import transaction
+from django.db import transaction, models
 from django.db.models import Q
 from users.permissions import IsInventoryStaffOrAdmin, CanDeleteProducts
-from users.mixins import PartnerFilterMixin, require_partner_for_request
-from .models import Category, Product, Supplier, PurchaseOrder, POItem
+from users.mixins import PartnerFilterMixin, require_partner_for_request, get_store_id_from_request
+from .models import Category, Product, Supplier, PurchaseOrder, POItem, StoreInventory
 from .serializers import (
     CategorySerializer, ProductSerializer, ProductCreateUpdateSerializer,
     SupplierSerializer, PurchaseOrderSerializer, PurchaseOrderCreateSerializer,
-    ReceiveItemSerializer
+    ReceiveItemSerializer, StoreInventorySerializer
 )
 from stock.models import StockTransaction
 from stores.utils import get_default_store
@@ -58,6 +58,16 @@ class ProductListCreateView(PartnerFilterMixin, generics.ListCreateAPIView):
     def get_queryset(self):
         queryset = super().get_queryset()
         
+        # Filter by store for store-level users
+        store_id = get_store_id_from_request(self.request)
+        if store_id:
+            # Store-level users: show only products available at their store
+            # Products with no stores assigned are available to all stores
+            queryset = queryset.filter(
+                models.Q(available_stores__id=store_id) | 
+                models.Q(available_stores__isnull=True)
+            ).distinct()
+        
         # Filter by search query
         search = self.request.query_params.get('search', None)
         if search:
@@ -72,17 +82,20 @@ class ProductListCreateView(PartnerFilterMixin, generics.ListCreateAPIView):
         if category:
             queryset = queryset.filter(category_id=category)
         
-        # Filter by low stock
-        low_stock = self.request.query_params.get('low_stock', None)
-        if low_stock == 'true':
-            queryset = [p for p in queryset if p.is_low_stock]
-        
         # Filter by active status
         is_active = self.request.query_params.get('is_active', None)
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
         
         return queryset
+    
+    def get_serializer_context(self):
+        """Add store_id to serializer context for stock filtering"""
+        context = super().get_serializer_context()
+        store_id = get_store_id_from_request(self.request)
+        if store_id:
+            context['request'].store_id = store_id
+        return context
 
 
 class ProductDetailView(PartnerFilterMixin, generics.RetrieveUpdateDestroyAPIView):
@@ -110,6 +123,44 @@ def product_barcode_lookup(request, barcode):
             {'error': 'Product not found with this barcode'},
             status=status.HTTP_404_NOT_FOUND
         )
+
+
+# Store Inventory Views
+class StoreInventoryListView(PartnerFilterMixin, generics.ListCreateAPIView):
+    """List or create store inventory records"""
+    queryset = StoreInventory.objects.select_related('product', 'store').all()
+    serializer_class = StoreInventorySerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        
+        # Filter by store
+        store_id = self.request.query_params.get('store_id')
+        if store_id:
+            queryset = queryset.filter(store_id=store_id)
+        elif hasattr(self.request.user, 'assigned_store') and self.request.user.assigned_store:
+            # Auto-filter for store-level users
+            queryset = queryset.filter(store=self.request.user.assigned_store)
+        
+        # Filter by product
+        product_id = self.request.query_params.get('product_id')
+        if product_id:
+            queryset = queryset.filter(product_id=product_id)
+        
+        # Filter by low stock
+        low_stock = self.request.query_params.get('low_stock')
+        if low_stock == 'true':
+            queryset = queryset.filter(current_stock__lte=models.F('minimum_stock_level'))
+        
+        return queryset
+
+
+class StoreInventoryDetailView(PartnerFilterMixin, generics.RetrieveUpdateDestroyAPIView):
+    """Retrieve, update or delete store inventory"""
+    queryset = StoreInventory.objects.select_related('product', 'store').all()
+    serializer_class = StoreInventorySerializer
+    permission_classes = [IsAuthenticated, IsInventoryStaffOrAdmin]
 
 
 # Supplier Views
@@ -213,11 +264,25 @@ def receive_po_items(request, po_id):
             po_item.received_quantity += received_qty
             po_item.save()
             
-            # Update product stock
+            # Ensure store is set
+            if not store:
+                return Response(
+                    {'error': 'Store is required for receiving items'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Get or create store inventory record
             product = po_item.product
-            quantity_before = product.current_stock
-            product.current_stock += received_qty
-            product.save()
+            store_inventory, created = StoreInventory.objects.get_or_create(
+                product=product,
+                store=store,
+                defaults={'current_stock': 0, 'minimum_stock_level': 10}
+            )
+            
+            # Update store inventory stock
+            quantity_before = store_inventory.current_stock
+            store_inventory.current_stock += received_qty
+            store_inventory.save()
             
             # Create stock transaction
             StockTransaction.objects.create(
@@ -228,7 +293,7 @@ def receive_po_items(request, po_id):
                 reason='PURCHASE',
                 quantity=received_qty,
                 quantity_before=quantity_before,
-                quantity_after=product.current_stock,
+                quantity_after=store_inventory.current_stock,
                 reference_number=purchase_order.po_number,
                 performed_by=request.user
             )

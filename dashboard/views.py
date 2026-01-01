@@ -7,11 +7,11 @@ from django.utils import timezone
 from datetime import timedelta
 from decimal import Decimal
 
-from inventory.models import Product
+from inventory.models import Product, StoreInventory
 from sales.models import Sale
 from stock.models import StockTransaction
 from expenses.models import Expense, ExpenseCategory
-from users.mixins import require_partner_for_request
+from users.mixins import require_partner_for_request, get_store_id_from_request
 
 
 def get_partner_filtered_queryset(model, request, partner_field='partner'):
@@ -25,10 +25,12 @@ def get_partner_filtered_queryset(model, request, partner_field='partner'):
 @permission_classes([IsAuthenticated])
 def dashboard_stats(request):
     """
-    Get comprehensive dashboard statistics
+    Get comprehensive dashboard statistics.
+    Store filtering is automatic when impersonating a store.
     """
     partner = require_partner_for_request(request)
-    store_id = request.query_params.get('store_id')
+    # Get store_id from query param OR effective store (impersonation/assigned)
+    store_id = get_store_id_from_request(request)
     today = timezone.now().date()
     yesterday = today - timedelta(days=1)
     week_ago = today - timedelta(days=7)
@@ -41,6 +43,8 @@ def dashboard_stats(request):
         products_qs = products_qs.filter(partner=partner)
     if store_id:
         sales_qs = sales_qs.filter(store_id=store_id)
+        # Note: Products are partner-level, not store-level
+        # Store inventory is tracked via StockTransaction records
     
     # Today's sales
     today_sales = sales_qs.filter(created_at__date=today).aggregate(
@@ -56,15 +60,21 @@ def dashboard_stats(request):
     yesterday_total = float(yesterday_sales['total'] or 0)
     sales_change = ((today_total - yesterday_total) / yesterday_total * 100) if yesterday_total > 0 else 0
     
+    # Get store inventories
+    inventory_qs = StoreInventory.objects.select_related('product').filter(product__is_active=True)
+    if partner:
+        inventory_qs = inventory_qs.filter(product__partner=partner)
+    if store_id:
+        inventory_qs = inventory_qs.filter(store_id=store_id)
+    
     # Low stock items
-    low_stock_products = products_qs.filter(
-        current_stock__lte=F('minimum_stock_level'),
-        is_active=True
+    low_stock_inventories = inventory_qs.filter(
+        current_stock__lte=F('minimum_stock_level')
     ).order_by('current_stock')[:10]
     
     # Total inventory value
-    total_inventory = products_qs.filter(is_active=True).aggregate(
-        total=Sum(F('current_stock') * F('cost_price'))
+    total_inventory = inventory_qs.aggregate(
+        total=Sum(F('current_stock') * F('product__cost_price'))
     )
     inventory_value = float(total_inventory['total'] or 0)
     
@@ -130,11 +140,10 @@ def dashboard_stats(request):
     stock_summary = {
         'total_products': products_qs.count(),
         'active_products': products_qs.filter(is_active=True).count(),
-        'low_stock_count': products_qs.filter(
-            current_stock__lte=F('minimum_stock_level'),
-            is_active=True
+        'low_stock_count': inventory_qs.filter(
+            current_stock__lte=F('minimum_stock_level')
         ).count(),
-        'out_of_stock_count': products_qs.filter(current_stock=0, is_active=True).count()
+        'out_of_stock_count': inventory_qs.filter(current_stock=0).count()
     }
     
     return Response({
@@ -144,14 +153,14 @@ def dashboard_stats(request):
             'change_percentage': round(sales_change, 2)
         },
         'low_stock_items': {
-            'count': low_stock_products.count(),
+            'count': low_stock_inventories.count(),
             'items': [{
-                'id': p.id,
-                'name': p.name,
-                'sku': p.sku,
-                'current_stock': p.current_stock,
-                'minimum_stock_level': p.minimum_stock_level
-            } for p in low_stock_products]
+                'id': inv.product.id,
+                'name': inv.product.name,
+                'sku': inv.product.sku,
+                'current_stock': inv.current_stock,
+                'minimum_stock_level': inv.minimum_stock_level
+            } for inv in low_stock_inventories]
         },
         'total_inventory_value': {
             'value': f'{inventory_value:.2f}',
@@ -190,7 +199,7 @@ def daily_sales_report(request):
     from sales.models import SaleItem
     
     partner = require_partner_for_request(request)
-    store_id = request.query_params.get('store_id')
+    store_id = get_store_id_from_request(request)
     
     date_str = request.query_params.get('date', timezone.now().date().isoformat())
     try:
@@ -256,7 +265,7 @@ def daily_sales_report(request):
 def weekly_sales_report(request):
     """Get weekly sales summary"""
     partner = require_partner_for_request(request)
-    store_id = request.query_params.get('store_id')
+    store_id = get_store_id_from_request(request)
     today = timezone.now().date()
     week_start = today - timedelta(days=today.weekday())
     
@@ -309,7 +318,7 @@ def monthly_revenue_report(request):
     from sales.models import SaleItem
     
     partner = require_partner_for_request(request)
-    store_id = request.query_params.get('store_id')
+    store_id = get_store_id_from_request(request)
     today = timezone.now().date()
     months_data = []
     
@@ -394,7 +403,7 @@ def monthly_revenue_report(request):
 def payment_breakdown_report(request):
     """Get payment method breakdown"""
     partner = require_partner_for_request(request)
-    store_id = request.query_params.get('store_id')
+    store_id = get_store_id_from_request(request)
     date_str = request.query_params.get('date')
     period = request.query_params.get('period', 'today')  # today, week, month, all
     
@@ -455,39 +464,41 @@ def payment_breakdown_report(request):
 def stock_levels_report(request):
     """Get comprehensive stock levels report"""
     partner = require_partner_for_request(request)
-    products = Product.objects.select_related('category').filter(is_active=True)
+    store_id = get_store_id_from_request(request)
+    
+    inventory_qs = StoreInventory.objects.select_related('product', 'product__category', 'store')
     if partner:
-        products = products.filter(partner=partner)
-    products = products.order_by('category__name', 'name')
+        inventory_qs = inventory_qs.filter(product__partner=partner)
+    if store_id:
+        inventory_qs = inventory_qs.filter(store_id=store_id)
+    inventory_qs = inventory_qs.filter(product__is_active=True).order_by('product__category__name', 'product__name')
     
     stock_data = []
-    for p in products:
+    for inv in inventory_qs:
         status = 'OK'
-        if p.current_stock == 0:
+        if inv.current_stock == 0:
             status = 'Out of Stock'
-        elif p.current_stock <= p.minimum_stock_level:
+        elif inv.current_stock <= inv.minimum_stock_level:
             status = 'Low Stock'
         
         stock_data.append({
-            'id': p.id,
-            'name': p.name,
-            'sku': p.sku,
-            'category': p.category.name if p.category else 'Uncategorized',
-            'current_stock': p.current_stock,
-            'minimum_stock_level': p.minimum_stock_level,
-            'cost_price': str(p.cost_price),
-            'selling_price': str(p.selling_price),
-            'stock_value': float(p.current_stock * p.cost_price),
-            'status': status
+            'id': inv.product.id,
+            'name': inv.product.name,
+            'sku': inv.product.sku,
+            'category': inv.product.category.name if inv.product.category else 'Uncategorized',
+            'current_stock': inv.current_stock,
+            'minimum_stock_level': inv.minimum_stock_level,
+            'cost_price': str(inv.product.cost_price),
+            'selling_price': str(inv.product.selling_price),
+            'stock_value': float(inv.current_stock * inv.product.cost_price),
+            'status': status,
+            'store_name': inv.store.name if inv.store else 'N/A'
         })
     
-    summary_qs = Product.objects.filter(is_active=True)
-    if partner:
-        summary_qs = summary_qs.filter(partner=partner)
-    summary = summary_qs.aggregate(
-        total_products=Count('id'),
+    summary = inventory_qs.aggregate(
+        total_products=Count('product', distinct=True),
         total_stock=Sum('current_stock'),
-        total_value=Sum(F('current_stock') * F('cost_price'))
+        total_value=Sum(F('current_stock') * F('product__cost_price'))
     )
     
     return Response({
@@ -509,27 +520,32 @@ def stock_levels_report(request):
 def low_stock_report(request):
     """Get low stock alert report"""
     partner = require_partner_for_request(request)
-    products = Product.objects.select_related('category').filter(
-        is_active=True,
+    store_id = get_store_id_from_request(request)
+    
+    inventory_qs = StoreInventory.objects.select_related('product', 'product__category', 'store').filter(
+        product__is_active=True,
         current_stock__lte=F('minimum_stock_level')
     )
     if partner:
-        products = products.filter(partner=partner)
-    products = products.order_by('current_stock')
+        inventory_qs = inventory_qs.filter(product__partner=partner)
+    if store_id:
+        inventory_qs = inventory_qs.filter(store_id=store_id)
+    inventory_qs = inventory_qs.order_by('current_stock')
     
     low_stock_items = [{
-        'id': p.id,
-        'name': p.name,
-        'sku': p.sku,
-        'category': p.category.name if p.category else 'Uncategorized',
-        'current_stock': p.current_stock,
-        'minimum_stock_level': p.minimum_stock_level,
-        'deficit': p.minimum_stock_level - p.current_stock,
-        'reorder_quantity': max(p.minimum_stock_level * 2 - p.current_stock, 0),
-        'cost_price': str(p.cost_price),
-        'reorder_cost': float((p.minimum_stock_level * 2 - p.current_stock) * p.cost_price) if p.current_stock < p.minimum_stock_level * 2 else 0,
-        'is_out_of_stock': p.current_stock == 0
-    } for p in products]
+        'id': inv.product.id,
+        'name': inv.product.name,
+        'sku': inv.product.sku,
+        'category': inv.product.category.name if inv.product.category else 'Uncategorized',
+        'current_stock': inv.current_stock,
+        'minimum_stock_level': inv.minimum_stock_level,
+        'deficit': inv.minimum_stock_level - inv.current_stock,
+        'reorder_quantity': max(inv.minimum_stock_level * 2 - inv.current_stock, 0),
+        'cost_price': str(inv.product.cost_price),
+        'reorder_cost': float((inv.minimum_stock_level * 2 - inv.current_stock) * inv.product.cost_price) if inv.current_stock < inv.minimum_stock_level * 2 else 0,
+        'is_out_of_stock': inv.current_stock == 0,
+        'store_name': inv.store.name if inv.store else 'N/A'
+    } for inv in inventory_qs]
     
     return Response({
         'report_type': 'Low Stock Alert Report',
@@ -548,7 +564,7 @@ def low_stock_report(request):
 def stock_movement_report(request):
     """Get stock movement history report"""
     partner = require_partner_for_request(request)
-    store_id = request.query_params.get('store_id')
+    store_id = get_store_id_from_request(request)
     days = int(request.query_params.get('days', 30))
     start_date = timezone.now().date() - timedelta(days=days)
     
@@ -653,7 +669,7 @@ def top_selling_report(request):
     from sales.models import SaleItem
     
     partner = require_partner_for_request(request)
-    store_id = request.query_params.get('store_id')
+    store_id = get_store_id_from_request(request)
     days = int(request.query_params.get('days', 30))
     limit = int(request.query_params.get('limit', 20))
     start_date = timezone.now().date() - timedelta(days=days)
@@ -742,7 +758,7 @@ def products_by_category_report(request):
 def monthly_expenses_report(request):
     """Get monthly expenses analysis report"""
     partner = require_partner_for_request(request)
-    store_id = request.query_params.get('store_id')
+    store_id = get_store_id_from_request(request)
     today = timezone.now().date()
     months_data = []
     
@@ -805,7 +821,7 @@ def monthly_expenses_report(request):
 def expenses_by_category_report(request):
     """Get expenses breakdown by category"""
     partner = require_partner_for_request(request)
-    store_id = request.query_params.get('store_id')
+    store_id = get_store_id_from_request(request)
     days = int(request.query_params.get('days', 30))
     start_date = timezone.now().date() - timedelta(days=days)
     
@@ -853,7 +869,7 @@ def expenses_by_category_report(request):
 def expenses_by_vendor_report(request):
     """Get expenses breakdown by vendor"""
     partner = require_partner_for_request(request)
-    store_id = request.query_params.get('store_id')
+    store_id = get_store_id_from_request(request)
     days = int(request.query_params.get('days', 30))
     start_date = timezone.now().date() - timedelta(days=days)
     
@@ -898,7 +914,7 @@ def expenses_by_vendor_report(request):
 def expense_transactions_report(request):
     """Get detailed expense transactions report"""
     partner = require_partner_for_request(request)
-    store_id = request.query_params.get('store_id')
+    store_id = get_store_id_from_request(request)
     days = int(request.query_params.get('days', 30))
     start_date = timezone.now().date() - timedelta(days=days)
     

@@ -55,6 +55,12 @@ class Product(models.Model):
         blank=True,
         help_text='Partner/tenant this product belongs to'
     )
+    available_stores = models.ManyToManyField(
+        'stores.Store',
+        related_name='available_products',
+        blank=True,
+        help_text='Stores where this product is available. Empty means available in all partner stores.'
+    )
     sku = models.CharField(max_length=100, help_text='Stock Keeping Unit / Part Number')
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
@@ -84,16 +90,6 @@ class Product(models.Model):
         blank=True,
         null=True,
         help_text='Wholesale/bulk price (optional)'
-    )
-    minimum_stock_level = models.IntegerField(
-        default=10,
-        validators=[MinValueValidator(0)],
-        help_text='Alert when stock falls below this level'
-    )
-    current_stock = models.IntegerField(
-        default=0,
-        validators=[MinValueValidator(0)],
-        help_text='Current available stock quantity'
     )
     barcode = models.CharField(
         max_length=100,
@@ -130,16 +126,64 @@ class Product(models.Model):
     
     def __str__(self):
         return f"{self.sku} - {self.name}"
+
+
+class StoreInventory(models.Model):
+    """Store-level inventory tracking - tracks stock per product per store"""
+    
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name='store_inventories',
+        help_text='Product being tracked'
+    )
+    store = models.ForeignKey(
+        'stores.Store',
+        on_delete=models.CASCADE,
+        related_name='inventories',
+        help_text='Store where this inventory is located'
+    )
+    current_stock = models.IntegerField(
+        default=0,
+        validators=[MinValueValidator(0)],
+        help_text='Current available stock quantity at this store'
+    )
+    minimum_stock_level = models.IntegerField(
+        default=10,
+        validators=[MinValueValidator(0)],
+        help_text='Alert when stock falls below this level for this store'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'store_inventories'
+        ordering = ['store', 'product']
+        verbose_name_plural = 'Store Inventories'
+        indexes = [
+            models.Index(fields=['product']),
+            models.Index(fields=['store']),
+            models.Index(fields=['current_stock']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['product', 'store'],
+                name='unique_product_per_store'
+            )
+        ]
+    
+    def __str__(self):
+        return f"{self.product.name} @ {self.store.name}: {self.current_stock}"
     
     @property
     def is_low_stock(self):
-        """Check if product is below minimum stock level"""
+        """Check if inventory is below minimum stock level"""
         return self.current_stock <= self.minimum_stock_level
     
     @property
     def stock_value(self):
-        """Calculate total value of current stock"""
-        return self.current_stock * self.cost_price
+        """Calculate total value of current stock at this store"""
+        return self.current_stock * self.product.cost_price
 
 
 class Supplier(models.Model):

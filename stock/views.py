@@ -7,7 +7,7 @@ from django.db import transaction
 from decimal import Decimal
 from users.permissions import IsInventoryStaffOrAdmin
 from users.mixins import PartnerFilterMixin, require_partner_for_request
-from inventory.models import Product
+from inventory.models import Product, StoreInventory
 from stores.utils import get_default_store
 from stores.models import Store
 from .models import StockTransaction, ProductCostHistory
@@ -98,25 +98,39 @@ def stock_adjustment(request):
             filter_kwargs['id'] = data['product_id']
             product = get_object_or_404(Product, **filter_kwargs)
         
+        # Ensure store is set
+        if not store:
+            return Response(
+                {'error': 'Store is required for stock adjustments'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Get or create store inventory record
+        store_inventory, created = StoreInventory.objects.get_or_create(
+            product=product,
+            store=store,
+            defaults={'current_stock': 0, 'minimum_stock_level': 10}
+        )
+        
         quantity = data['quantity']
         adjustment_type = data['adjustment_type']
         
         # Check if we have enough stock for OUT adjustments
-        if adjustment_type == 'OUT' and product.current_stock < quantity:
+        if adjustment_type == 'OUT' and store_inventory.current_stock < quantity:
             return Response(
-                {'error': f'Insufficient stock. Available: {product.current_stock}'},
+                {'error': f'Insufficient stock. Available: {store_inventory.current_stock}'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Update product stock
-        quantity_before = product.current_stock
+        # Update store inventory stock
+        quantity_before = store_inventory.current_stock
         
         if adjustment_type == 'IN':
-            product.current_stock += quantity
+            store_inventory.current_stock += quantity
         elif adjustment_type == 'OUT':
-            product.current_stock -= quantity
+            store_inventory.current_stock -= quantity
         else:  # ADJUSTMENT - set to exact quantity
-            product.current_stock = quantity
+            store_inventory.current_stock = quantity
         
         # Handle cost tracking for IN transactions
         unit_cost = None
@@ -140,7 +154,9 @@ def stock_adjustment(request):
                 product.cost_price = unit_cost
                 cost_changed = True
         
-        product.save()
+        store_inventory.save()
+        if cost_changed:
+            product.save()
         
         # Create stock transaction
         stock_transaction = StockTransaction.objects.create(
@@ -151,7 +167,7 @@ def stock_adjustment(request):
             reason=data['reason'],
             quantity=quantity,
             quantity_before=quantity_before,
-            quantity_after=product.current_stock,
+            quantity_after=store_inventory.current_stock,
             unit_cost=unit_cost,
             total_cost=total_cost,
             reference_number=data.get('reference_number', ''),

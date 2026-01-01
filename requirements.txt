@@ -32,3 +32,19 @@ factory-boy==3.3.1
 
 # Utilities
 python-dateutil==2.9.0
+
+# Celery for background tasks
+celery==5.4.0
+redis==5.0.1
+django-celery-beat==2.6.0
+django-celery-results==2.5.1
+
+# Excel export
+openpyxl==3.1.2
+
+# PDF generation
+weasyprint==62.1
+
+# HTTP requests (for SMS)
+requests==2.31.0
+

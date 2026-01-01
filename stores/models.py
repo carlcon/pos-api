@@ -1,6 +1,32 @@
 from django.db import models
 
 
+DEFAULT_RECEIPT_TEMPLATE = """
+=====================================
+           {{store_name}}
+=====================================
+{{store_address}}
+Tel: {{store_phone}}
+
+Receipt #: {{sale_number}}
+Date: {{date}}
+Cashier: {{cashier}}
+-------------------------------------
+ITEMS:
+{{items}}
+-------------------------------------
+Subtotal:          {{subtotal}}
+Discount:          {{discount}}
+-------------------------------------
+TOTAL:             {{total}}
+-------------------------------------
+Payment: {{payment_method}}
+=====================================
+     Thank you for your purchase!
+=====================================
+"""
+
+
 class Store(models.Model):
     partner = models.ForeignKey(
         'users.Partner',
@@ -18,6 +44,22 @@ class Store(models.Model):
     is_default = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    
+    # Receipt settings
+    auto_print_receipt = models.BooleanField(
+        default=False,
+        help_text='Automatically print receipt after sale completion'
+    )
+    printer_name = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text='Name of the printer to use for receipts'
+    )
+    receipt_template = models.TextField(
+        default=DEFAULT_RECEIPT_TEMPLATE,
+        help_text='Receipt template with placeholders (editable via Django admin)'
+    )
 
     class Meta:
         db_table = 'stores'
@@ -33,3 +75,29 @@ class Store(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.code})"
+    
+    def render_receipt(self, sale):
+        """Render receipt from template with sale data."""
+        from django.utils import timezone
+        
+        # Build items list
+        items_text = ""
+        for item in sale.items.all():
+            items_text += f"{item.product.name}\n"
+            items_text += f"  {item.quantity} x {item.unit_price:.2f} = {item.line_total:.2f}\n"
+        
+        # Replace placeholders
+        receipt = self.receipt_template
+        receipt = receipt.replace('{{store_name}}', self.name)
+        receipt = receipt.replace('{{store_address}}', self.address or '')
+        receipt = receipt.replace('{{store_phone}}', self.contact_phone or '')
+        receipt = receipt.replace('{{sale_number}}', sale.sale_number)
+        receipt = receipt.replace('{{date}}', sale.created_at.strftime('%Y-%m-%d %H:%M:%S'))
+        receipt = receipt.replace('{{cashier}}', sale.cashier.username if sale.cashier else 'N/A')
+        receipt = receipt.replace('{{items}}', items_text)
+        receipt = receipt.replace('{{subtotal}}', f"{sale.subtotal:.2f}")
+        receipt = receipt.replace('{{discount}}', f"{sale.discount:.2f}")
+        receipt = receipt.replace('{{total}}', f"{sale.total_amount:.2f}")
+        receipt = receipt.replace('{{payment_method}}', sale.get_payment_method_display())
+        
+        return receipt

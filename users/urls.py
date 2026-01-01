@@ -16,8 +16,12 @@ urlpatterns = [
     path('partners/', views.PartnerListCreateView.as_view(), name='partner-list-create'),
     path('partners/<int:pk>/', views.PartnerDetailView.as_view(), name='partner-detail'),
     
-    # Impersonation endpoints
+    # Partner impersonation endpoints (Super Admin)
     path('impersonate/<int:partner_id>/', views.impersonate_partner, name='impersonate-partner'),
     path('exit-impersonation/', views.exit_impersonation, name='exit-impersonation'),
     path('impersonation-status/', views.get_impersonation_status, name='impersonation-status'),
+    
+    # Store impersonation endpoints (Partner Admin / Super Admin)
+    path('impersonate/<int:partner_id>/store/<int:store_id>/', views.impersonate_store, name='impersonate-store'),
+    path('exit-store-impersonation/', views.exit_store_impersonation, name='exit-store-impersonation'),
 ]

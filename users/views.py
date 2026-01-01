@@ -14,14 +14,17 @@ from .serializers import (
     UserSerializer, UserCreateSerializer, UserUpdateSerializer, ChangePasswordSerializer,
     PartnerSerializer
 )
-from .permissions import IsAdmin, IsSuperAdmin
+from .permissions import IsAdmin, IsSuperAdmin, IsAdminOrSuperAdmin
+from stores.models import Store
+from stores.serializers import StoreSerializer
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login_view(request):
     """
-    OAuth2 login endpoint that returns access and refresh tokens
+    OAuth2 login endpoint that returns access and refresh tokens.
+    Checks store status for STORE_ADMIN/CASHIER users.
     """
     username = request.data.get('username')
     password = request.data.get('password')
@@ -45,6 +48,14 @@ def login_view(request):
             {'error': 'User account is disabled'},
             status=status.HTTP_403_FORBIDDEN
         )
+    
+    # Check store status for store-level users
+    if user.is_store_level_user and user.assigned_store:
+        if not user.assigned_store.is_active:
+            return Response(
+                {'error': 'Your store is currently inactive. Please contact your administrator.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
     
     # Get or create OAuth2 application
     application = Application.objects.filter(name='pos-frontend').first()
@@ -340,7 +351,159 @@ def exit_impersonation(request):
 @permission_classes([IsAuthenticated])
 def get_impersonation_status(request):
     """
-    Check if current token is an impersonation token and return partner info.
+    Check if current token is an impersonation token and return partner/store info.
+    """
+    result = {
+        'is_impersonating_partner': False,
+        'partner': None,
+        'is_impersonating_store': False,
+        'store': None,
+    }
+    
+    try:
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        if auth_header.startswith('Bearer '):
+            token_string = auth_header.split(' ')[1]
+            access_token = AccessToken.objects.get(token=token_string)
+            
+            # Check for partner impersonation
+            if 'impersonating:' in access_token.scope:
+                scope_parts = access_token.scope.split()
+                for part in scope_parts:
+                    if part.startswith('impersonating:'):
+                        partner_id = int(part.split(':')[1])
+                        partner = Partner.objects.get(id=partner_id)
+                        result['is_impersonating_partner'] = True
+                        result['partner'] = PartnerSerializer(partner).data
+                        break
+            
+            # Check for store impersonation
+            if 'impersonating_store:' in access_token.scope:
+                scope_parts = access_token.scope.split()
+                for part in scope_parts:
+                    if part.startswith('impersonating_store:'):
+                        store_id = int(part.split(':')[1])
+                        store = Store.objects.get(id=store_id)
+                        result['is_impersonating_store'] = True
+                        result['store'] = StoreSerializer(store).data
+                        break
+    except (AccessToken.DoesNotExist, Partner.DoesNotExist, Store.DoesNotExist, ValueError):
+        pass
+    
+    return Response(result)
+
+
+# ============== Store Impersonation Views ==============
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsAdminOrSuperAdmin])
+def impersonate_store(request, partner_id, store_id):
+    """
+    Partner Admin or Super Admin impersonates a store.
+    Creates a new token with store scope.
+    
+    For Super Admin: must already be impersonating the partner.
+    For Partner Admin: can directly impersonate stores in their partner.
+    """
+    user = request.user
+    
+    # Get the store
+    store = get_object_or_404(Store, id=store_id, partner_id=partner_id)
+    
+    if not store.is_active:
+        return Response(
+            {'error': 'Cannot impersonate inactive store'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Verify access
+    if user.is_super_admin:
+        # Super admin must be impersonating the partner
+        from users.mixins import get_partner_from_request
+        effective_partner = get_partner_from_request(request)
+        if not effective_partner or effective_partner.id != partner_id:
+            return Response(
+                {'error': 'Must impersonate partner before impersonating store'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+    elif user.is_admin:
+        # Partner admin can only impersonate stores in their partner
+        if user.partner_id != partner_id:
+            return Response(
+                {'error': 'Cannot impersonate store from different partner'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+    else:
+        return Response(
+            {'error': 'Insufficient permissions'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    # Get OAuth2 application
+    application = Application.objects.filter(name='pos-frontend').first()
+    if not application:
+        return Response(
+            {'error': 'OAuth application not found'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    
+    # Build scope - preserve partner impersonation if exists
+    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+    current_scope = 'read write'
+    
+    if auth_header.startswith('Bearer '):
+        token_string = auth_header.split(' ')[1]
+        try:
+            current_token = AccessToken.objects.get(token=token_string)
+            if 'impersonating:' in current_token.scope:
+                # Preserve partner impersonation
+                for part in current_token.scope.split():
+                    if part.startswith('impersonating:'):
+                        current_scope += f' {part}'
+                        break
+        except AccessToken.DoesNotExist:
+            pass
+    
+    # Add store impersonation to scope
+    new_scope = f'{current_scope} impersonating_store:{store.id}'
+    
+    # Create store impersonation token with separate expiry
+    expires = timezone.now() + timedelta(
+        seconds=oauth2_settings.ACCESS_TOKEN_EXPIRE_SECONDS
+    )
+    
+    store_token = AccessToken.objects.create(
+        user=user,
+        application=application,
+        token=generate_token(),
+        expires=expires,
+        scope=new_scope
+    )
+    
+    # Create refresh token
+    refresh_token = RefreshToken.objects.create(
+        user=user,
+        application=application,
+        token=generate_token(),
+        access_token=store_token
+    )
+    
+    return Response({
+        'access_token': store_token.token,
+        'refresh_token': refresh_token.token,
+        'expires_in': oauth2_settings.ACCESS_TOKEN_EXPIRE_SECONDS,
+        'token_type': 'Bearer',
+        'impersonating_store': StoreSerializer(store).data,
+        'message': f'Now viewing as store: {store.name}'
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def exit_store_impersonation(request):
+    """
+    Exit store impersonation mode.
+    Keeps partner impersonation active if applicable.
     """
     try:
         auth_header = request.META.get('HTTP_AUTHORIZATION', '')
@@ -348,22 +511,67 @@ def get_impersonation_status(request):
             token_string = auth_header.split(' ')[1]
             access_token = AccessToken.objects.get(token=token_string)
             
-            # Check if this is an impersonation token
-            if 'impersonating:' in access_token.scope:
-                # Extract partner ID from scope
-                scope_parts = access_token.scope.split()
-                for part in scope_parts:
+            # Check if this is a store impersonation token
+            if 'impersonating_store:' not in access_token.scope:
+                return Response(
+                    {'error': 'Not in store impersonation mode'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check if also impersonating partner
+            has_partner_impersonation = 'impersonating:' in access_token.scope
+            
+            if has_partner_impersonation:
+                # Create new token with only partner impersonation
+                application = access_token.application
+                expires = timezone.now() + timedelta(
+                    seconds=oauth2_settings.ACCESS_TOKEN_EXPIRE_SECONDS
+                )
+                
+                # Extract partner impersonation from scope
+                partner_scope = 'read write'
+                for part in access_token.scope.split():
                     if part.startswith('impersonating:'):
-                        partner_id = int(part.split(':')[1])
-                        partner = Partner.objects.get(id=partner_id)
-                        return Response({
-                            'is_impersonating': True,
-                            'partner': PartnerSerializer(partner).data
-                        })
-    except (AccessToken.DoesNotExist, Partner.DoesNotExist, ValueError):
+                        partner_scope += f' {part}'
+                        break
+                
+                # Create new partner-only impersonation token
+                new_token = AccessToken.objects.create(
+                    user=access_token.user,
+                    application=application,
+                    token=generate_token(),
+                    expires=expires,
+                    scope=partner_scope
+                )
+                
+                new_refresh = RefreshToken.objects.create(
+                    user=access_token.user,
+                    application=application,
+                    token=generate_token(),
+                    access_token=new_token
+                )
+                
+                # Delete the store impersonation token
+                RefreshToken.objects.filter(access_token=access_token).delete()
+                access_token.delete()
+                
+                return Response({
+                    'message': 'Exited store impersonation mode',
+                    'access_token': new_token.token,
+                    'refresh_token': new_refresh.token,
+                    'expires_in': oauth2_settings.ACCESS_TOKEN_EXPIRE_SECONDS,
+                    'token_type': 'Bearer',
+                })
+            else:
+                # Just delete the store impersonation token
+                RefreshToken.objects.filter(access_token=access_token).delete()
+                access_token.delete()
+                return Response({'message': 'Exited store impersonation mode'})
+                
+    except AccessToken.DoesNotExist:
         pass
     
-    return Response({
-        'is_impersonating': False,
-        'partner': None
-    })
+    return Response(
+        {'error': 'Invalid token'},
+        status=status.HTTP_400_BAD_REQUEST
+    )

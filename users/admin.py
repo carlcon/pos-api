@@ -38,18 +38,18 @@ class PartnerAdmin(admin.ModelAdmin):
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
-    list_display = ['username', 'email', 'role', 'employee_id', 'partner', 'is_super_admin', 'is_active_employee', 'is_staff']
-    list_filter = ['role', 'partner', 'is_active_employee', 'is_staff', 'is_superuser', 'is_super_admin']
+    list_display = ['username', 'email', 'role', 'employee_id', 'partner', 'assigned_store', 'is_super_admin', 'is_active_employee', 'is_staff']
+    list_filter = ['role', 'partner', 'assigned_store', 'is_active_employee', 'is_staff', 'is_superuser', 'is_super_admin']
     search_fields = ['username', 'email', 'employee_id', 'first_name', 'last_name']
 
     fieldsets = BaseUserAdmin.fieldsets + (
         ('Additional Info', {
-            'fields': ('role', 'phone', 'employee_id', 'is_active_employee', 'partner', 'is_super_admin')
+            'fields': ('role', 'phone', 'employee_id', 'is_active_employee', 'partner', 'is_super_admin', 'assigned_store')
         }),
     )
 
     add_fieldsets = BaseUserAdmin.add_fieldsets + (
         ('Additional Info', {
-            'fields': ('role', 'phone', 'employee_id', 'is_active_employee', 'partner', 'is_super_admin')
+            'fields': ('role', 'phone', 'employee_id', 'is_active_employee', 'partner', 'is_super_admin', 'assigned_store')
         }),
     )

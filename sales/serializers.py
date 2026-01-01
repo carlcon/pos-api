@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import Sale, SaleItem
 from inventory.serializers import ProductSerializer
+from inventory.models import StoreInventory
 from stores.models import Store
 from stores.utils import get_default_store
 from users.mixins import get_partner_from_request
@@ -124,10 +125,24 @@ class SaleCreateSerializer(serializers.ModelSerializer):
                 product = item_data['product']
                 quantity = item_data['quantity']
                 
-                # Check stock availability
-                if product.current_stock < quantity:
+                # Ensure store is set for inventory check
+                if not store:
                     raise serializers.ValidationError(
-                        {'stock': f'Insufficient stock for {product.name}. Available: {product.current_stock}'}
+                        {'store': 'Store is required for sales transactions'}
+                    )
+                
+                # Get or create store inventory
+                try:
+                    store_inventory = StoreInventory.objects.get(product=product, store=store)
+                except StoreInventory.DoesNotExist:
+                    raise serializers.ValidationError(
+                        {'stock': f'{product.name} is not available at this store. Please add it to inventory first.'}
+                    )
+                
+                # Check stock availability
+                if store_inventory.current_stock < quantity:
+                    raise serializers.ValidationError(
+                        {'stock': f'Insufficient stock for {product.name}. Available: {store_inventory.current_stock}'}
                     )
                 
                 # Create sale item
@@ -141,10 +156,10 @@ class SaleCreateSerializer(serializers.ModelSerializer):
                     line_total=line_total
                 )
                 
-                # Update product stock
-                quantity_before = product.current_stock
-                product.current_stock -= quantity
-                product.save()
+                # Update store inventory stock
+                quantity_before = store_inventory.current_stock
+                store_inventory.current_stock -= quantity
+                store_inventory.save()
                 
                 # Create stock transaction
                 StockTransaction.objects.create(
@@ -155,7 +170,7 @@ class SaleCreateSerializer(serializers.ModelSerializer):
                     reason='SALE',
                     quantity=quantity,
                     quantity_before=quantity_before,
-                    quantity_after=product.current_stock,
+                    quantity_after=store_inventory.current_stock,
                     reference_number=sale.sale_number,
                     performed_by=self.context['request'].user
                 )
