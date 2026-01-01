@@ -1,0 +1,67 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv/
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+*.cover
+.hypothesis/
+test_db.sqlite3
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# Documentation
+*.md
+!DEPLOYMENT.md
+docs/
+
+# Logs
+logs/
+*.log
+
+# Local env files
+.env
+.env.local
+.env.*.local
+
+# Media uploads (will be mounted as volume)
+media/
+
+# Static files (generated during build)
+staticfiles/
+
+# Misc
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.docker/
+
+# CI/CD
+.github/

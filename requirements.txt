@@ -51,3 +51,6 @@ tinycss2==1.4.0
 # HTTP requests (for SMS)
 requests==2.31.0
 
+# Production WSGI Server
+gunicorn==21.2.0
+
