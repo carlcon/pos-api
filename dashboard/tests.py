@@ -196,8 +196,9 @@ class TestStockLevelsReportAPI:
         assert 'summary' in response.data
         assert 'products' in response.data
     
-    def test_stock_levels_summary(self, admin_client, product, low_stock_product, partner, category):
+    def test_stock_levels_summary(self, admin_client, product, low_stock_product, partner, category, store):
         """Test stock levels summary contains expected fields"""
+        from inventory.models import StoreInventory
         out_of_stock = Product.objects.create(
             partner=partner,
             sku='OOS-001',
@@ -205,9 +206,13 @@ class TestStockLevelsReportAPI:
             category=category,
             cost_price=Decimal('10.00'),
             selling_price=Decimal('18.00'),
-            current_stock=0,
-            minimum_stock_level=5,
             is_active=True
+        )
+        StoreInventory.objects.create(
+            product=out_of_stock,
+            store=store,
+            current_stock=0,
+            minimum_stock_level=5
         )
         
         response = admin_client.get('/api/dashboard/reports/stock-levels/')
@@ -276,18 +281,24 @@ class TestStockMovementReportAPI:
 class TestInventoryValuationReportAPI:
     """Test cases for inventory valuation report endpoint"""
     
-    def test_inventory_valuation_report(self, admin_client, product, partner, category):
+    def test_inventory_valuation(self, admin_client, product, partner, category, store):
         """Test inventory valuation report returns correct data"""
+        from inventory.models import StoreInventory
         category2 = Category.objects.create(partner=partner, name='Electrical')
-        Product.objects.create(
+        ele_product = Product.objects.create(
             partner=partner,
             sku='ELE-001',
             name='Battery',
             category=category2,
             cost_price=Decimal('80.00'),
             selling_price=Decimal('120.00'),
-            current_stock=20,
             is_active=True
+        )
+        StoreInventory.objects.create(
+            product=ele_product,
+            store=store,
+            current_stock=20,
+            minimum_stock_level=5
         )
         
         response = admin_client.get('/api/dashboard/reports/inventory-valuation/')
@@ -338,18 +349,24 @@ class TestTopSellingReportAPI:
 class TestProductsByCategoryReportAPI:
     """Test cases for products by category report endpoint"""
     
-    def test_products_by_category_report(self, admin_client, product, product2, category, partner):
+    def test_products_by_category_report(self, admin_client, product, product2, category, partner, store):
         """Test products by category report returns correct data"""
+        from inventory.models import StoreInventory
         category2 = Category.objects.create(partner=partner, name='Electrical Category')
-        Product.objects.create(
+        alt_product = Product.objects.create(
             partner=partner,
             sku='ELE-002',
             name='Alternator',
             category=category2,
             cost_price=Decimal('80.00'),
             selling_price=Decimal('120.00'),
-            current_stock=20,
             is_active=True
+        )
+        StoreInventory.objects.create(
+            product=alt_product,
+            store=store,
+            current_stock=20,
+            minimum_stock_level=5
         )
         
         response = admin_client.get('/api/dashboard/reports/products-by-category/')

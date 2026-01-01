@@ -423,7 +423,9 @@ class TestStockAdjustmentAPI:
 
     def test_stock_adjustment_increase(self, admin_client, product):
         """Test increasing stock via adjustment"""
-        initial_stock = product.current_stock
+        from inventory.models import StoreInventory
+        inventory = StoreInventory.objects.get(product=product, store=product.partner.stores.first())
+        initial_stock = inventory.current_stock
         
         response = admin_client.post('/api/stock/adjust/', {
             'product_id': product.id,
@@ -434,12 +436,15 @@ class TestStockAdjustmentAPI:
         })
         
         assert response.status_code == status.HTTP_200_OK
-        product.refresh_from_db()
-        assert product.current_stock == initial_stock + 10
+        from inventory.models import StoreInventory
+        inventory = StoreInventory.objects.get(product=product, store=product.partner.stores.first())
+        assert inventory.current_stock == initial_stock + 10
 
     def test_stock_adjustment_decrease(self, admin_client, product):
         """Test decreasing stock via adjustment"""
-        initial_stock = product.current_stock
+        from inventory.models import StoreInventory
+        inventory = StoreInventory.objects.get(product=product, store=product.partner.stores.first())
+        initial_stock = inventory.current_stock
         
         response = admin_client.post('/api/stock/adjust/', {
             'product_id': product.id,
@@ -450,8 +455,9 @@ class TestStockAdjustmentAPI:
         })
         
         assert response.status_code == status.HTTP_200_OK
-        product.refresh_from_db()
-        assert product.current_stock == initial_stock - 5
+        from inventory.models import StoreInventory
+        inventory = StoreInventory.objects.get(product=product, store=product.partner.stores.first())
+        assert inventory.current_stock == initial_stock - 5
 
     def test_stock_adjustment_creates_transaction(self, admin_client, product):
         """Test stock adjustment creates transaction record"""
@@ -524,9 +530,11 @@ class TestStockAdjustmentAPI:
         """Test all valid adjustment reasons"""
         reasons = ['DAMAGED', 'LOST', 'RECONCILIATION', 'RETURN', 'MANUAL']
         
+        from inventory.models import StoreInventory
         for reason in reasons:
-            product.current_stock = 100
-            product.save()
+            inventory = StoreInventory.objects.get(product=product, store=product.partner.stores.first())
+            inventory.current_stock = 100
+            inventory.save()
             
             response = admin_client.post('/api/stock/adjust/', {
                 'product_id': product.id,
@@ -554,9 +562,11 @@ class TestLowStockAPI:
 
     def test_low_stock_partner_isolation(self, admin_client, low_stock_product, partner2_product):
         """Test low stock only shows partner's products"""
-        partner2_product.current_stock = 1
-        partner2_product.minimum_stock_level = 10
-        partner2_product.save()
+        from inventory.models import StoreInventory
+        partner2_inventory = StoreInventory.objects.get(product=partner2_product, store=partner2_product.partner.stores.first())
+        partner2_inventory.current_stock = 1
+        partner2_inventory.minimum_stock_level = 10
+        partner2_inventory.save()
         
         response = admin_client.get('/api/stock/low-stock/')
         
@@ -686,7 +696,9 @@ class TestStockImpersonation:
 
     def test_impersonation_can_adjust_stock(self, impersonation_client, product, partner):
         """Test impersonation can adjust stock for partner"""
-        initial_stock = product.current_stock
+        from inventory.models import StoreInventory
+        inventory = StoreInventory.objects.get(product=product, store=product.partner.stores.first())
+        initial_stock = inventory.current_stock
         
         response = impersonation_client.post('/api/stock/adjust/', {
             'product_id': product.id,
@@ -696,8 +708,9 @@ class TestStockImpersonation:
         })
         
         assert response.status_code == status.HTTP_200_OK
-        product.refresh_from_db()
-        assert product.current_stock == initial_stock + 5
+        from inventory.models import StoreInventory
+        inventory = StoreInventory.objects.get(product=product, store=product.partner.stores.first())
+        assert inventory.current_stock == initial_stock + 5
         
         transaction = StockTransaction.objects.filter(product=product).latest('created_at')
         assert transaction.partner == partner

@@ -95,16 +95,22 @@ class TestSaleItemModel:
         item = sale.items.first()
         assert product.name in str(item) or product.sku in str(item)
     
-    def test_sale_item_with_discount(self, sale, product, category, partner):
+    def test_sale_item_with_discount(self, sale, product, category, partner, store):
         """Test sale item with discount applied"""
+        from inventory.models import StoreInventory
         product2 = Product.objects.create(
             partner=partner,
             sku='SALE-DISC-001',
             name='Discounted Product',
             category=category,
             cost_price=Decimal('15.00'),
-            selling_price=Decimal('25.00'),
-            current_stock=50
+            selling_price=Decimal('25.00')
+        )
+        StoreInventory.objects.create(
+            product=product2,
+            store=store,
+            current_stock=50,
+            minimum_stock_level=10
         )
         sale_item = SaleItem.objects.create(
             sale=sale,
@@ -217,11 +223,16 @@ class TestSaleCreateAPI:
 
     def test_create_sale_success(self, cashier_client, product, partner):
         """Test creating a sale successfully"""
-        initial_stock = product.current_stock
+        from inventory.models import StoreInventory
+        # Get the store that has inventory for this product
+        store_inv = StoreInventory.objects.get(product=product)
+        store = store_inv.store
+        initial_stock = store_inv.current_stock
         
         response = cashier_client.post('/api/sales/', {
             'customer_name': 'Test Customer',
             'payment_method': 'CASH',
+            'store_id': store.id,
             'items': [
                 {
                     'product': product.id,
@@ -231,17 +242,21 @@ class TestSaleCreateAPI:
             ]
         }, format='json')
         
-        assert response.status_code == status.HTTP_201_CREATED
+        assert response.status_code == status.HTTP_201_CREATED, f"Expected 201, got {response.status_code}: {response.data}"
         assert 'sale_number' in response.data
         
-        product.refresh_from_db()
-        assert product.current_stock == initial_stock - 2
+        store_inv.refresh_from_db()
+        assert store_inv.current_stock == initial_stock - 2
 
     def test_create_wholesale_sale(self, cashier_client, product):
         """Test creating a wholesale sale"""
+        from inventory.models import StoreInventory
+        store = StoreInventory.objects.get(product=product).store
+        
         response = cashier_client.post('/api/sales/', {
             'customer_name': 'Wholesale Customer',
             'payment_method': 'BANK_TRANSFER',
+            'store_id': store.id,
             'is_wholesale': True,
             'items': [
                 {
@@ -257,9 +272,13 @@ class TestSaleCreateAPI:
 
     def test_create_sale_with_discount(self, cashier_client, product):
         """Test creating a sale with discount"""
+        from inventory.models import StoreInventory
+        store = StoreInventory.objects.get(product=product).store
+        
         response = cashier_client.post('/api/sales/', {
             'customer_name': 'Discount Customer',
             'payment_method': 'CASH',
+            'store_id': store.id,
             'discount': '10.00',
             'items': [
                 {
@@ -275,8 +294,12 @@ class TestSaleCreateAPI:
 
     def test_create_sale_insufficient_stock(self, cashier_client, product):
         """Test creating sale with insufficient stock fails"""
+        from inventory.models import StoreInventory
+        store = StoreInventory.objects.get(product=product).store
+        
         response = cashier_client.post('/api/sales/', {
             'payment_method': 'CASH',
+            'store_id': store.id,
             'items': [
                 {
                     'product': product.id,
@@ -290,8 +313,12 @@ class TestSaleCreateAPI:
 
     def test_create_sale_auto_assigns_partner(self, cashier_client, product, partner):
         """Test sale is auto-assigned to cashier's partner"""
+        from inventory.models import StoreInventory
+        store = StoreInventory.objects.get(product=product).store
+        
         response = cashier_client.post('/api/sales/', {
             'payment_method': 'CASH',
+            'store_id': store.id,
             'items': [
                 {
                     'product': product.id,
@@ -307,8 +334,12 @@ class TestSaleCreateAPI:
 
     def test_create_sale_auto_assigns_cashier(self, cashier_client, product, cashier_user):
         """Test sale is auto-assigned to current user as cashier"""
+        from inventory.models import StoreInventory
+        store = StoreInventory.objects.get(product=product).store
+        
         response = cashier_client.post('/api/sales/', {
             'payment_method': 'CASH',
+            'store_id': store.id,
             'items': [
                 {
                     'product': product.id,
@@ -438,8 +469,12 @@ class TestSalesRoleAccess:
 
     def test_cashier_can_create_sales(self, cashier_client, product):
         """Test cashier can create sales"""
+        from inventory.models import StoreInventory
+        store = StoreInventory.objects.get(product=product).store
+        
         response = cashier_client.post('/api/sales/', {
             'payment_method': 'CASH',
+            'store_id': store.id,
             'items': [
                 {
                     'product': product.id,

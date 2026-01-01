@@ -6,6 +6,7 @@ Run this after running migrations to test the complete flow.
 
 import os
 import django
+import pytest
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'main.settings')
 django.setup()
@@ -18,6 +19,7 @@ from users.models import Partner
 User = get_user_model()
 
 
+@pytest.mark.django_db
 def test_inventory_system():
     """Test the inventory system"""
     print("\n" + "="*60)

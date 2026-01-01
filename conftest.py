@@ -265,6 +265,32 @@ def impersonation_client(api_client, impersonation_token):
 # ============== Inventory Fixtures ==============
 
 @pytest.fixture
+def store(db, partner):
+    """Create a test store for partner"""
+    from stores.models import Store
+    return Store.objects.create(
+        partner=partner,
+        code='STORE001',
+        name='Test Store',
+        is_active=True,
+        is_default=True
+    )
+
+
+@pytest.fixture
+def partner2_store(db, partner2):
+    """Create a test store for partner2"""
+    from stores.models import Store
+    return Store.objects.create(
+        partner=partner2,
+        code='STORE002',
+        name='Partner2 Store',
+        is_active=True,
+        is_default=True
+    )
+
+
+@pytest.fixture
 def category(db, partner):
     """Create a test category"""
     from inventory.models import Category
@@ -298,10 +324,10 @@ def partner2_category(db, partner2):
 
 
 @pytest.fixture
-def product(db, partner, category):
+def product(db, partner, category, store):
     """Create a test product"""
-    from inventory.models import Product
-    return Product.objects.create(
+    from inventory.models import Product, StoreInventory
+    product = Product.objects.create(
         partner=partner,
         sku='TEST-SKU-001',
         name='Test Product',
@@ -311,18 +337,24 @@ def product(db, partner, category):
         cost_price=Decimal('100.00'),
         selling_price=Decimal('150.00'),
         wholesale_price=Decimal('120.00'),
-        minimum_stock_level=10,
-        current_stock=50,
         barcode='1234567890123',
         is_active=True
     )
+    # Create store inventory for this product
+    StoreInventory.objects.create(
+        product=product,
+        store=store,
+        current_stock=50,
+        minimum_stock_level=10
+    )
+    return product
 
 
 @pytest.fixture
-def product2(db, partner, category):
+def product2(db, partner, category, store):
     """Create a second test product"""
-    from inventory.models import Product
-    return Product.objects.create(
+    from inventory.models import Product, StoreInventory
+    product = Product.objects.create(
         partner=partner,
         sku='TEST-SKU-002',
         name='Second Product',
@@ -330,44 +362,63 @@ def product2(db, partner, category):
         category=category,
         cost_price=Decimal('200.00'),
         selling_price=Decimal('300.00'),
-        minimum_stock_level=5,
-        current_stock=20,
         barcode='1234567890124',
         is_active=True
     )
+    # Create store inventory for this product
+    StoreInventory.objects.create(
+        product=product,
+        store=store,
+        current_stock=20,
+        minimum_stock_level=5
+    )
+    return product
 
 
 @pytest.fixture
-def low_stock_product(db, partner, category):
+def low_stock_product(db, partner, category, store):
     """Create a product with low stock"""
-    from inventory.models import Product
-    return Product.objects.create(
+    from inventory.models import Product, StoreInventory
+    product = Product.objects.create(
         partner=partner,
         sku='LOW-STOCK-001',
         name='Low Stock Product',
         category=category,
         cost_price=Decimal('50.00'),
         selling_price=Decimal('75.00'),
-        minimum_stock_level=20,
-        current_stock=5,
         is_active=True
     )
+    # Create store inventory with low stock
+    StoreInventory.objects.create(
+        product=product,
+        store=store,
+        current_stock=5,
+        minimum_stock_level=20
+    )
+    return product
 
 
 @pytest.fixture
-def partner2_product(db, partner2, partner2_category):
+def partner2_product(db, partner2, partner2_category, partner2_store):
     """Create a product for partner2"""
-    from inventory.models import Product
-    return Product.objects.create(
+    from inventory.models import Product, StoreInventory
+    product = Product.objects.create(
         partner=partner2,
         sku='P2-SKU-001',
         name='Partner2 Product',
         category=partner2_category,
         cost_price=Decimal('80.00'),
         selling_price=Decimal('120.00'),
-        current_stock=30,
         is_active=True
     )
+    # Create store inventory for partner2
+    StoreInventory.objects.create(
+        product=product,
+        store=partner2_store,
+        current_stock=30,
+        minimum_stock_level=10
+    )
+    return product
 
 
 @pytest.fixture
