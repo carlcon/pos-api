@@ -232,7 +232,7 @@ class TestSaleCreateAPI:
         response = cashier_client.post('/api/sales/', {
             'customer_name': 'Test Customer',
             'payment_method': 'CASH',
-            'store_id': store.id,
+            'store': store.id,
             'items': [
                 {
                     'product': product.id,
@@ -256,7 +256,7 @@ class TestSaleCreateAPI:
         response = cashier_client.post('/api/sales/', {
             'customer_name': 'Wholesale Customer',
             'payment_method': 'BANK_TRANSFER',
-            'store_id': store.id,
+            'store': store.id,
             'is_wholesale': True,
             'items': [
                 {
@@ -278,7 +278,7 @@ class TestSaleCreateAPI:
         response = cashier_client.post('/api/sales/', {
             'customer_name': 'Discount Customer',
             'payment_method': 'CASH',
-            'store_id': store.id,
+            'store': store.id,
             'discount': '10.00',
             'items': [
                 {
@@ -318,7 +318,7 @@ class TestSaleCreateAPI:
         
         response = cashier_client.post('/api/sales/', {
             'payment_method': 'CASH',
-            'store_id': store.id,
+            'store': store.id,
             'items': [
                 {
                     'product': product.id,
@@ -339,7 +339,7 @@ class TestSaleCreateAPI:
         
         response = cashier_client.post('/api/sales/', {
             'payment_method': 'CASH',
-            'store_id': store.id,
+            'store': store.id,
             'items': [
                 {
                     'product': product.id,
@@ -474,7 +474,7 @@ class TestSalesRoleAccess:
         
         response = cashier_client.post('/api/sales/', {
             'payment_method': 'CASH',
-            'store_id': store.id,
+            'store': store.id,
             'items': [
                 {
                     'product': product.id,

@@ -358,6 +358,7 @@ class TestPermissions:
         class MockRequest:
             def __init__(self, user):
                 self.user = user
+                self.META = {}
         
         assert permission.has_permission(MockRequest(admin_user), None)
         assert permission.has_permission(MockRequest(inventory_staff_user), None)
@@ -630,7 +631,7 @@ class TestImpersonationAPI:
         response = impersonation_client.get('/api/auth/impersonation-status/')
         
         assert response.status_code == status.HTTP_200_OK
-        assert response.data['is_impersonating'] is True
+        assert response.data['is_impersonating_partner'] is True
         assert response.data['partner']['id'] == partner.id
 
     def test_impersonation_status_when_not_impersonating(self, admin_client):
@@ -638,7 +639,7 @@ class TestImpersonationAPI:
         response = admin_client.get('/api/auth/impersonation-status/')
         
         assert response.status_code == status.HTTP_200_OK
-        assert response.data['is_impersonating'] is False
+        assert response.data['is_impersonating_partner'] is False
 
 
 # ============== Multi-Tenant Data Isolation Tests ==============
@@ -707,8 +708,12 @@ class TestRolePermissions:
 
     def test_cashier_can_create_sales(self, cashier_client, product):
         """Test cashier can create sales"""
+        from inventory.models import StoreInventory
+        store = StoreInventory.objects.get(product=product).store
+        
         response = cashier_client.post('/api/sales/', {
             'payment_method': 'CASH',
+            'store': store.id,
             'items': [
                 {
                     'product': product.id,

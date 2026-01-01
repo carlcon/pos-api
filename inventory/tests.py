@@ -62,13 +62,13 @@ class TestProductModel:
         """Test low stock detection via StoreInventory"""
         from inventory.models import StoreInventory
         
-        # Create store inventory with low stock
-        store_inv = StoreInventory.objects.create(
-            product=product,
-            store=store,
-            current_stock=5,
-            minimum_stock_level=10
-        )
+        # Get existing store inventory (created by fixture)
+        store_inv = StoreInventory.objects.get(product=product, store=store)
+        
+        # Set to low stock
+        store_inv.current_stock = 5
+        store_inv.minimum_stock_level = 10
+        store_inv.save()
         
         assert store_inv.current_stock < store_inv.minimum_stock_level
         
@@ -82,13 +82,12 @@ class TestProductModel:
         """Test stock value calculation via StoreInventory"""
         from inventory.models import StoreInventory
         
-        # Create store inventory
-        store_inv = StoreInventory.objects.create(
-            product=product,
-            store=store,
-            current_stock=100,
-            minimum_stock_level=10
-        )
+        # Get existing store inventory (created by fixture)
+        store_inv = StoreInventory.objects.get(product=product, store=store)
+        
+        # Update stock for test
+        store_inv.current_stock = 100
+        store_inv.save()
         
         # Stock value is quantity * cost price
         expected_value = store_inv.current_stock * product.cost_price
@@ -476,16 +475,6 @@ class TestProductDetailAPI:
         product.refresh_from_db()
         assert product.selling_price == Decimal('200.00')
 
-    def test_update_product_minimum_stock(self, admin_client, product):
-        """Test updating product minimum stock level"""
-        response = admin_client.patch(f'/api/inventory/products/{product.id}/', {
-            'minimum_stock_level': 25
-        })
-        
-        assert response.status_code == status.HTTP_200_OK
-        product.refresh_from_db()
-        assert product.minimum_stock_level == 25
-
     def test_deactivate_product(self, admin_client, product):
         """Test deactivating a product"""
         response = admin_client.patch(f'/api/inventory/products/{product.id}/', {
@@ -719,35 +708,44 @@ class TestPurchaseOrderDetailAPI:
 class TestReceivePurchaseOrderAPI:
     """Test receiving purchase order items"""
 
-    def test_receive_po_items_updates_stock(self, admin_client, purchase_order, product):
+    def test_receive_po_items_updates_stock(self, admin_client, purchase_order, product, store):
         """Test receiving items updates product stock"""
         from inventory.models import StoreInventory
         po_item = purchase_order.items.first()
-        inventory = StoreInventory.objects.get(product=product, store=product.partner.stores.first())
+        inventory = StoreInventory.objects.get(product=product, store=store)
         initial_stock = inventory.current_stock
         
-        response = admin_client.post(f'/api/inventory/purchase-orders/{purchase_order.id}/receive/', [
-            {
-                'item_id': po_item.id,
-                'received_quantity': 5
-            }
-        ], format='json')
+        response = admin_client.post(
+            f'/api/inventory/purchase-orders/{purchase_order.id}/receive/?store_id={store.id}',
+            [
+                {
+                    'item_id': po_item.id,
+                    'received_quantity': 5
+                }
+            ],
+            format='json'
+        )
         
         assert response.status_code == status.HTTP_200_OK
         inventory.refresh_from_db()
         assert inventory.current_stock == initial_stock + 5
 
-    def test_receive_po_updates_received_quantity(self, admin_client, purchase_order):
+    def test_receive_po_updates_received_quantity(self, admin_client, purchase_order, store):
         """Test receiving updates PO item received quantity"""
         po_item = purchase_order.items.first()
         
-        admin_client.post(f'/api/inventory/purchase-orders/{purchase_order.id}/receive/', [
-            {
-                'item_id': po_item.id,
-                'received_quantity': 3
-            }
-        ], format='json')
+        response = admin_client.post(
+            f'/api/inventory/purchase-orders/{purchase_order.id}/receive/?store_id={store.id}',
+            [
+                {
+                    'item_id': po_item.id,
+                    'received_quantity': 3
+                }
+            ],
+            format='json'
+        )
         
+        assert response.status_code == status.HTTP_200_OK
         po_item.refresh_from_db()
         assert po_item.received_quantity == 3
 

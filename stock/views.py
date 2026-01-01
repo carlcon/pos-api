@@ -4,9 +4,10 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db import transaction
+from django.db.models import F, Q
 from decimal import Decimal
 from users.permissions import IsInventoryStaffOrAdmin
-from users.mixins import PartnerFilterMixin, require_partner_for_request
+from users.mixins import PartnerFilterMixin, require_partner_for_request, get_store_id_from_request
 from inventory.models import Product, StoreInventory
 from stores.utils import get_default_store
 from stores.models import Store
@@ -235,14 +236,27 @@ class ProductCostHistoryListView(PartnerFilterMixin, generics.ListAPIView):
 def low_stock_products(request):
     """Get products with stock below minimum level"""
     from inventory.serializers import ProductSerializer
+    from inventory.models import StoreInventory
+    from users.mixins import get_store_id_from_request
     
     partner = require_partner_for_request(request)
-    products = Product.objects.select_related('category').filter(partner=partner)
+    store_id = get_store_id_from_request(request)
     
-    low_stock = [p for p in products if p.is_low_stock and p.is_active]
+    # Get StoreInventory items that are low stock
+    inventory_qs = StoreInventory.objects.select_related('product', 'product__category').filter(
+        product__partner=partner,
+        product__is_active=True,
+        current_stock__lte=F('minimum_stock_level')
+    )
     
-    serializer = ProductSerializer(low_stock, many=True)
+    if store_id:
+        inventory_qs = inventory_qs.filter(store_id=store_id)
+    
+    # Extract products from low stock inventory items
+    products = [inv.product for inv in inventory_qs]
+    
+    serializer = ProductSerializer(products, many=True)
     return Response({
-        'count': len(low_stock),
+        'count': len(products),
         'products': serializer.data
     })

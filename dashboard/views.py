@@ -286,7 +286,7 @@ def daily_sales_report(request):
     } for s in sales.order_by('-created_at')]
     
     # Paginate transactions
-    pagination = paginate_data(transactions, request, 'data')
+    pagination = paginate_data(transactions, request, 'transactions')
     
     return Response({
         'report_type': 'Daily Sales Report',
@@ -340,7 +340,7 @@ def weekly_sales_report(request):
         })
     
     # Paginate daily breakdown
-    pagination = paginate_data(weekly_data, request, 'data')
+    pagination = paginate_data(weekly_data, request, 'daily_breakdown')
     
     return Response({
         'report_type': 'Weekly Sales Summary',
@@ -430,12 +430,10 @@ def monthly_revenue_report(request):
     for month in months_data:
         month['gross_income'] = f"₱{month['gross_income']:,.2f}"
     
-    # Paginate monthly breakdown
-    pagination = paginate_data(months_data, request, 'data')
-    
     return Response({
         'report_type': 'Monthly Revenue Analysis',
         'period': f'{months_data[0]["month"]} - {months_data[-1]["month"]}',
+        'monthly_breakdown': months_data,  # Return all 12 months without pagination
         'summary': {
             'total_revenue': total_revenue,
             'total_cost': total_cost,
@@ -445,8 +443,7 @@ def monthly_revenue_report(request):
             'average_monthly_gross_income': f"₱{(total_gross_income / 12):,.2f}",
             'best_month': max(months_data, key=lambda x: float(x['total_revenue']))['month'],
             'best_month_revenue': max(float(m['total_revenue']) for m in months_data)
-        },
-        **pagination
+        }
     })
 
 
@@ -501,7 +498,7 @@ def payment_breakdown_report(request):
     } for b in breakdown]
     
     # Paginate breakdown
-    pagination = paginate_data(breakdown_list, request, 'data')
+    pagination = paginate_data(breakdown_list, request, 'breakdown')
     
     return Response({
         'report_type': 'Payment Method Breakdown',
@@ -559,7 +556,7 @@ def stock_levels_report(request):
     )
     
     # Paginate products
-    pagination = paginate_data(stock_data, request, 'data')
+    pagination = paginate_data(stock_data, request, 'products')
     
     return Response({
         'report_type': 'Stock Levels Report',
@@ -608,7 +605,7 @@ def low_stock_report(request):
     } for inv in inventory_qs]
     
     # Paginate items
-    pagination = paginate_data(low_stock_items, request, 'data')
+    pagination = paginate_data(low_stock_items, request, 'items')
     
     return Response({
         'report_type': 'Low Stock Alert Report',
@@ -664,7 +661,7 @@ def stock_movement_report(request):
     } for t in transactions]
     
     # Paginate movements
-    pagination = paginate_data(movement_data, request, 'data')
+    pagination = paginate_data(movement_data, request, 'movements')
     
     return Response({
         'report_type': 'Stock Movement History',
@@ -722,7 +719,7 @@ def inventory_valuation_report(request):
     
     # Sort and paginate categories
     sorted_categories = sorted(categories, key=lambda x: x['cost_value'], reverse=True)
-    pagination = paginate_data(sorted_categories, request, 'data')
+    pagination = paginate_data(sorted_categories, request, 'by_category')
     
     return Response({
         'report_type': 'Inventory Valuation Report',
@@ -781,7 +778,7 @@ def top_selling_report(request):
     } for i, p in enumerate(top_products)]
     
     # Paginate products
-    pagination = paginate_data(products_list, request, 'data')
+    pagination = paginate_data(products_list, request, 'products')
     
     return Response({
         'report_type': 'Top Selling Products',
@@ -840,7 +837,7 @@ def products_by_category_report(request):
     category_data.sort(key=lambda x: x['product_count'], reverse=True)
     
     # Paginate categories
-    pagination = paginate_data(category_data, request, 'data')
+    pagination = paginate_data(category_data, request, 'categories')
     
     return Response({
         'report_type': 'Products by Category',
@@ -903,7 +900,7 @@ def monthly_expenses_report(request):
     total_expenses = sum(m['total_expenses'] for m in months_data)
     
     # Paginate monthly breakdown
-    pagination = paginate_data(months_data, request, 'data')
+    pagination = paginate_data(months_data, request, 'monthly_breakdown')
     
     return Response({
         'report_type': 'Monthly Expenses Analysis',
@@ -957,7 +954,7 @@ def expenses_by_category_report(request):
     } for c in by_category]
     
     # Paginate categories
-    pagination = paginate_data(categories_list, request, 'data')
+    pagination = paginate_data(categories_list, request, 'categories')
     
     return Response({
         'report_type': 'Expenses by Category',
@@ -1007,7 +1004,7 @@ def expenses_by_vendor_report(request):
     } for v in by_vendor]
     
     # Paginate vendors
-    pagination = paginate_data(vendors_list, request, 'data')
+    pagination = paginate_data(vendors_list, request, 'vendors')
     
     return Response({
         'report_type': 'Expenses by Vendor',
@@ -1067,7 +1064,7 @@ def expense_transactions_report(request):
     } for e in expenses]
     
     # Paginate transactions
-    pagination = paginate_data(transactions_list, request, 'data')
+    pagination = paginate_data(transactions_list, request, 'transactions')
     
     return Response({
         'report_type': 'Expense Transactions Report',

@@ -159,12 +159,11 @@ class TestExpenseCategoryCreateAPI:
 
     def test_create_expense_category_duplicate_name_fails(self, admin_client, expense_category):
         """Test duplicate category name in same partner fails"""
-        from django.db import IntegrityError
+        response = admin_client.post('/api/expenses/categories/', {
+            'name': expense_category.name
+        })
         
-        with pytest.raises(IntegrityError):
-            admin_client.post('/api/expenses/categories/', {
-                'name': expense_category.name
-            })
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_create_expense_category_same_name_different_partner_ok(self, partner2_client, expense_category):
         """Test different partners can have same expense category name"""

@@ -167,15 +167,16 @@ class CanAdjustStock(permissions.BasePermission):
         if not request.user or not request.user.is_authenticated:
             return False
         
-        # Check if user is impersonating a store
-        from users.mixins import get_effective_store
-        effective_store = get_effective_store(request)
+        # Partner admins, store admins, and inventory staff can adjust stock
+        if request.user.role in [User.Role.ADMIN, User.Role.STORE_ADMIN, User.Role.INVENTORY_STAFF]:
+            return True
         
-        # Super admin or partner admin must impersonate store
-        if request.user.is_super_admin or request.user.is_admin:
-            return effective_store is not None
+        # Super admins must impersonate to adjust stock
+        if request.user.is_super_admin:
+            from users.mixins import get_effective_store
+            return get_effective_store(request) is not None
         
-        return request.user.role in [User.Role.STORE_ADMIN, User.Role.INVENTORY_STAFF]
+        return False
 
 
 class CanDeleteTransactions(permissions.BasePermission):

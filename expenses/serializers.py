@@ -15,6 +15,33 @@ class ExpenseCategorySerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['created_at', 'updated_at']
     
+    def validate(self, data):
+        """Validate unique category name per partner and store"""
+        request = self.context.get('request')
+        if request and request.user:
+            from users.mixins import require_partner_for_request
+            partner = require_partner_for_request(request)
+            name = data.get('name')
+            store = data.get('store')
+            
+            # Check for duplicates with same partner, store, and name
+            queryset = ExpenseCategory.objects.filter(
+                partner=partner,
+                store=store,
+                name=name
+            )
+            
+            # Exclude self if updating
+            if self.instance:
+                queryset = queryset.exclude(pk=self.instance.pk)
+            
+            if queryset.exists():
+                raise serializers.ValidationError({
+                    'name': 'An expense category with this name already exists for this partner and store.'
+                })
+        
+        return data
+    
     def get_expense_count(self, obj):
         return obj.expenses.count()
     

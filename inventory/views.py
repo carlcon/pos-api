@@ -224,7 +224,8 @@ def receive_po_items(request, po_id):
     partner = require_partner_for_request(request)
     purchase_order = get_object_or_404(PurchaseOrder, id=po_id, partner=partner)
     store = None
-    store_id = request.data.get('store_id')
+    # Get store_id from query params since request.data is the items array
+    store_id = request.query_params.get('store_id') or request.GET.get('store_id')
     if store_id:
         store = get_object_or_404(Store, id=store_id, partner=partner) if partner else get_object_or_404(Store, id=store_id)
     elif partner:
