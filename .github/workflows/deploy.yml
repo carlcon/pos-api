@@ -141,7 +141,7 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
           # Save SSH key
-          echo "$EC2_SSH_KEY" | base64 -d > ec2_key.pem
+          echo "$EC2_SSH_KEY" | tr -d '[: space:]' | base64 -d > ec2_key.pem
           chmod 600 ec2_key.pem
           
           # SSH to EC2 and deploy
