@@ -2,9 +2,9 @@
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from django.db.models import Sum, Count, Q, F
+from django.db.models import Sum, Count, F
 from django.utils import timezone
-from django.http import FileResponse, Http404, QueryDict
+from django.http import FileResponse, Http404
 from django.core.paginator import Paginator, EmptyPage
 from datetime import timedelta
 from decimal import Decimal
@@ -426,6 +426,10 @@ def monthly_revenue_report(request):
     total_cost = sum(m['total_cost'] for m in months_data)
     total_gross_income = sum(m['gross_income'] for m in months_data)
     
+    # Format gross_income in months_data for display
+    for month in months_data:
+        month['gross_income'] = f"₱{month['gross_income']:,.2f}"
+    
     # Paginate monthly breakdown
     pagination = paginate_data(months_data, request, 'data')
     
@@ -435,12 +439,12 @@ def monthly_revenue_report(request):
         'summary': {
             'total_revenue': total_revenue,
             'total_cost': total_cost,
-            'total_gross_income': total_gross_income,
+            'total_gross_income': f"₱{total_gross_income:,.2f}",
             'overall_profit_margin': round((total_gross_income / total_revenue * 100), 2) if total_revenue > 0 else 0,
             'average_monthly_revenue': total_revenue / 12,
-            'average_monthly_gross_income': total_gross_income / 12,
-            'best_month': max(months_data, key=lambda x: x['total_revenue'])['month'],
-            'best_month_revenue': max(m['total_revenue'] for m in months_data)
+            'average_monthly_gross_income': f"₱{(total_gross_income / 12):,.2f}",
+            'best_month': max(months_data, key=lambda x: float(x['total_revenue']))['month'],
+            'best_month_revenue': max(float(m['total_revenue']) for m in months_data)
         },
         **pagination
     })

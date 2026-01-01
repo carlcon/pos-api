@@ -28,7 +28,7 @@ def generate_report_pdf(self, report_type, report_data, partner_id=None, store_i
         self.update_state(state='PROCESSING', meta={'status': 'Generating PDF...'})
         
         # Debug: print received data
-        print(f"=== PDF Generation Debug ===")
+        print("=== PDF Generation Debug ===")
         print(f"report_type: {report_type}")
         print(f"report_data keys: {report_data.keys() if report_data else 'None'}")
         print(f"report_data: {report_data}")
@@ -37,7 +37,7 @@ def generate_report_pdf(self, report_type, report_data, partner_id=None, store_i
         summary = format_summary(report_data.get('summary', {}))
         data_sections = extract_data_sections(report_data)
         
-        print(f"=== Formatted context ===")
+        print("=== Formatted context ===")
         print(f"summary: {summary}")
         print(f"data_sections keys: {data_sections.keys() if data_sections else 'None'}")
         print(f"data_sections: {data_sections}")
