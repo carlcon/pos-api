@@ -4,7 +4,7 @@
 # =============================================================================
 # Stage 1: Builder - Install dependencies
 # =============================================================================
-FROM python:3.12-slim as builder
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
@@ -54,11 +54,11 @@ COPY --chown=django:django . .
 RUN mkdir -p /app/staticfiles /app/media /app/logs && \
     chown -R django:django /app/staticfiles /app/media /app/logs
 
-# Collect static files
-RUN python manage.py collectstatic --noinput
-
-# Switch to non-root user
+# Switch to non-root user before collecting static files
 USER django
+
+# Collect static files (run as non-root user)
+RUN python manage.py collectstatic --noinput
 
 # Expose port
 EXPOSE 8000

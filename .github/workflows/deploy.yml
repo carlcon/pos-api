@@ -61,7 +61,7 @@ jobs:
           DB_PASSWORD: testpassword
           DB_HOST: localhost
           DB_PORT: 5432
-          SECRET_KEY: test-secret-key-for-ci
+          SECRET_KEY: ci-${{ github.run_id }}-${{ github.run_attempt }}-secret
           DEBUG: 'True'
         run: |
           pytest -v --tb=short
@@ -109,6 +109,16 @@ jobs:
           
           echo "image_uri=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+          timeout: '10m'
+
   # =============================================================================
   # Job 3: Deploy to EC2
   # =============================================================================
@@ -134,6 +144,13 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Add EC2 to known hosts
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts
+
       - name: Deploy to EC2
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
@@ -142,12 +159,16 @@ jobs:
           AWS_REGION: ${{ secrets.AWS_REGION }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
+          # Cleanup function to ensure SSH key is removed
+          cleanup() { rm -f ec2_key.pem; }
+          trap cleanup EXIT
+          
           # Save SSH key - remove any whitespace/newlines that GitHub might have added
           printf '%s' "$EC2_SSH_KEY" | base64 -d > ec2_key.pem
           chmod 600 ec2_key.pem
           
           # SSH to EC2 and deploy
-          ssh -o StrictHostKeyChecking=no -i ec2_key.pem ec2-user@$EC2_HOST << EOF
+          ssh -i ec2_key.pem ec2-user@$EC2_HOST << EOF
             cd /opt/pos-app
             
             # Login to ECR
@@ -173,9 +194,6 @@ jobs:
             
             echo "Deployment completed successfully!"
           EOF
-          
-          # Clean up
-          rm -f ec2_key.pem
 
       - name: Health check
         env:
@@ -184,8 +202,18 @@ jobs:
           # Wait for services to be ready
           sleep 30
           
-          # Check API health
-          curl -f http://$EC2_HOST/api/health/ || exit 1
+          # Check API health with retry logic
+          max_retries=5
+          retry_count=0
+          until curl -sf --max-time 10 http://$EC2_HOST/api/health/ > /dev/null 2>&1; do
+            retry_count=$((retry_count + 1))
+            if [ $retry_count -ge $max_retries ]; then
+              echo "Health check failed after $max_retries attempts"
+              exit 1
+            fi
+            echo "Health check attempt $retry_count failed, retrying in 10s..."
+            sleep 10
+          done
           
           echo "Health check passed!"
 
