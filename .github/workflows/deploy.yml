@@ -180,23 +180,35 @@ jobs:
           docker-compose -f docker-compose.prod.yml stop nginx api 2>/dev/null || true
           docker-compose -f docker-compose.prod.yml rm -f nginx api 2>/dev/null || true
           
-          # Start application services (API + Nginx together)
-          # Docker Compose handles dependency ordering via depends_on
+          # Run migrations BEFORE starting the API container
+          echo "Running database migrations..."
+          docker run --rm \
+            --network pos-network \
+            --env-file /opt/pos-app/.env \
+            -e DB_HOST=db \
+            pos-api:latest \
+            python manage.py migrate --noinput
+          
+          # Collect static files BEFORE starting the API container
+          echo "Collecting static files..."
+          docker run --rm \
+            --network pos-network \
+            --env-file /opt/pos-app/.env \
+            -v pos-static-files:/app/staticfiles \
+            pos-api:latest \
+            python manage.py collectstatic --noinput
+          
+          # Now start API and Nginx (docker-compose handles dependency ordering)
+          echo "Starting API and Nginx services..."
           docker-compose -f docker-compose.prod.yml up -d api nginx
           
-          # Wait for API to become healthy (start_period: 30s + buffer)
-          echo "Waiting for API container to become healthy..."
-          sleep 40
+          # Wait for services to stabilize
+          echo "Waiting for services to become healthy..."
+          sleep 30
           
           # Show container status for debugging
           echo "Container status:"
           docker-compose -f docker-compose.prod.yml ps
-          
-          # Run migrations
-          docker-compose -f docker-compose.prod.yml exec -T api python manage.py migrate --noinput
-          
-          # Collect static files
-          docker-compose -f docker-compose.prod.yml exec -T api python manage.py collectstatic --noinput
           
           # Clean up old images to save space
           docker image prune -f

@@ -54,11 +54,8 @@ COPY --chown=django:django . .
 RUN mkdir -p /app/staticfiles /app/media /app/logs && \
     chown -R django:django /app/staticfiles /app/media /app/logs
 
-# Switch to non-root user before collecting static files
+# Switch to non-root user
 USER django
-
-# Collect static files (run as non-root user)
-RUN python manage.py collectstatic --noinput
 
 # Expose port
 EXPOSE 8000
