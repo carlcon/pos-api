@@ -1,5 +1,6 @@
 # POS API - CI/CD Pipeline
 # Builds, tests, and deploys Django API to AWS EC2
+# Build happens directly on EC2 (no ECR required - $0 cost)
 
 name: Deploy POS API
 
@@ -10,11 +11,6 @@ on:
   pull_request:
     branches:
       - master
-
-env:
-  AWS_REGION: ${{ secrets.AWS_REGION }}
-  ECR_REPOSITORY: pos-api
-  IMAGE_TAG: ${{ github.sha }}
 
 jobs:
   # =============================================================================
@@ -67,82 +63,18 @@ jobs:
           pytest -v --tb=short
 
   # =============================================================================
-  # Job 2: Build and Push Docker Image
+  # Job 2: Deploy to EC2 (Build directly on EC2)
   # =============================================================================
-  build:
-    name: Build & Push Docker Image
+  deploy:
+    name: Deploy to EC2
     runs-on: ubuntu-latest
     needs: test
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     environment: Production
     
-    outputs:
-      image_uri: ${{ steps.build-image.outputs.image_uri }}
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build, tag, and push image to Amazon ECR
-        id: build-image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        run: |
-          # Build the Docker image
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          
-          # Push both tags
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          
-          echo "image_uri=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
-
-      - name: Scan image for vulnerabilities
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
-          format: 'table'
-          exit-code: '0'
-          ignore-unfixed: true
-          severity: 'CRITICAL,HIGH'
-          timeout: '10m'
-
-  # =============================================================================
-  # Job 3: Deploy to EC2
-  # =============================================================================
-  deploy:
-    name: Deploy to EC2
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
-    environment: Production
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Add EC2 to known hosts
         env:
@@ -151,37 +83,98 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts
 
-      - name: Deploy to EC2
+      - name: Setup SSH key
         env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-          IMAGE_TAG: ${{ github.sha }}
         run: |
-          # Cleanup function to ensure SSH key is removed
-          cleanup() { rm -f ec2_key.pem; }
-          trap cleanup EXIT
-          
-          # Save SSH key - remove any whitespace/newlines that GitHub might have added
           printf '%s' "$EC2_SSH_KEY" | base64 -d > ec2_key.pem
           chmod 600 ec2_key.pem
-          
-          # SSH to EC2 and deploy
-          ssh -i ec2_key.pem ec2-user@$EC2_HOST << EOF
+
+      - name: Sync code to EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          # Sync code to EC2 (excludes unnecessary files)
+          rsync -avz --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '__pycache__' \
+            --exclude '*.pyc' \
+            --exclude '.env' \
+            --exclude 'htmlcov' \
+            --exclude '.pytest_cache' \
+            --exclude 'logs/*.log' \
+            -e "ssh -i ec2_key.pem" \
+            ./ ec2-user@$EC2_HOST:/opt/pos-app/
+
+      - name: Create environment file on EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          ALLOWED_HOSTS: ${{ secrets.ALLOWED_HOSTS }}
+          CORS_ALLOWED_ORIGINS: ${{ secrets.CORS_ALLOWED_ORIGINS }}
+          CSRF_TRUSTED_ORIGINS: ${{ secrets.CSRF_TRUSTED_ORIGINS }}
+        run: |
+          ssh -i ec2_key.pem ec2-user@$EC2_HOST "cat > /opt/pos-app/.env << 'EOF'
+# Production Environment Variables - Auto-generated by CI/CD
+# DO NOT EDIT MANUALLY - Changes will be overwritten on next deployment
+
+# Django Settings
+SECRET_KEY=${SECRET_KEY}
+DEBUG=False
+ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
+
+# Database Settings
+DB_NAME=${DB_NAME:-pos_db}
+DB_USER=${DB_USER:-pos_user}
+DB_PASSWORD=${DB_PASSWORD}
+DB_HOST=db
+DB_PORT=5432
+
+# CORS/CSRF Settings
+CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS:-http://localhost:3000}
+
+# Celery Settings
+CELERY_BROKER_URL=redis://redis:6379/0
+CELERY_RESULT_BACKEND=django-db
+EOF"
+
+      - name: Build and deploy on EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          ssh -i ec2_key.pem ec2-user@$EC2_HOST << 'ENDSSH'
             cd /opt/pos-app
             
-            # Login to ECR
-            aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+            # Load environment variables
+            set -a
+            source .env
+            set +a
             
-            # Pull latest images
-            export ECR_REGISTRY=${ECR_REGISTRY}
-            export IMAGE_TAG=${IMAGE_TAG}
+            # Build the Docker image directly on EC2
+            echo "Building Docker image on EC2..."
+            docker build -t pos-api:latest .
             
-            docker-compose -f docker-compose.prod.yml pull api celery celery-beat
+            # Start database and redis first
+            docker-compose -f docker-compose.prod.yml up -d db redis
             
-            # Restart services with new images
+            # Wait for database to be ready
+            echo "Waiting for database to be ready..."
+            sleep 15
+            
+            # Stop old application containers
+            docker-compose -f docker-compose.prod.yml stop api celery celery-beat 2>/dev/null || true
+            docker-compose -f docker-compose.prod.yml rm -f api celery celery-beat 2>/dev/null || true
+            
+            # Start application services with new image
             docker-compose -f docker-compose.prod.yml up -d api celery celery-beat
+            
+            # Wait for api to start
+            sleep 10
             
             # Run migrations
             docker-compose -f docker-compose.prod.yml exec -T api python manage.py migrate --noinput
@@ -189,11 +182,15 @@ jobs:
             # Collect static files
             docker-compose -f docker-compose.prod.yml exec -T api python manage.py collectstatic --noinput
             
-            # Clean up old images
+            # Clean up old images to save space
             docker image prune -f
             
             echo "Deployment completed successfully!"
-          EOF
+ENDSSH
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ec2_key.pem
 
       - name: Health check
         env:

@@ -56,10 +56,7 @@ services:
   # Django API (Gunicorn)
   # =============================================================================
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: ${ECR_REGISTRY:-pos}/pos-api:${IMAGE_TAG:-latest}
+    image: pos-api:latest
     container_name: pos-api
     restart: unless-stopped
     environment:
@@ -100,10 +97,7 @@ services:
   # Celery Worker (Background Tasks)
   # =============================================================================
   celery:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: ${ECR_REGISTRY:-pos}/pos-api:${IMAGE_TAG:-latest}
+    image: pos-api:latest
     container_name: pos-celery
     restart: unless-stopped
     command: celery -A main worker --loglevel=info --concurrency=1
@@ -135,10 +129,7 @@ services:
   # Celery Beat (Scheduled Tasks)
   # =============================================================================
   celery-beat:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: ${ECR_REGISTRY:-pos}/pos-api:${IMAGE_TAG:-latest}
+    image: pos-api:latest
     container_name: pos-celery-beat
     restart: unless-stopped
     command: celery -A main beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
