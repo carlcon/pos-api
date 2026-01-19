@@ -189,7 +189,7 @@ jobs:
             pos-api:latest \
             python manage.py migrate --noinput
           
-          # Collect static files BEFORE starting the API container
+          # Collect static files
           echo "Collecting static files..."
           docker run --rm \
             --network pos-network \
@@ -198,29 +198,17 @@ jobs:
             pos-api:latest \
             python manage.py collectstatic --noinput
           
-          # Now start API and Nginx (docker-compose handles dependency ordering)
-          echo "Starting API and Nginx services..."
+          # Start API and Nginx
+          echo "Starting services..."
           docker-compose -f docker-compose.prod.yml up -d api nginx
           
-          # Wait briefly then check initial logs
-          echo "Waiting for services to start..."
-          sleep 15
-          
-          # Check API container logs immediately for startup issues
-          echo "=== API Container Logs ==="
-          docker logs pos-api --tail=30 2>&1 || true
-          
-          # Continue waiting for health checks
+          # Wait for services to be ready
           sleep 30
           
-          # Show container status for debugging
-          echo "=== Container Status ==="
-          docker-compose -f docker-compose.prod.yml ps
-          
-          # Clean up old images to save space
+          # Clean up old images
           docker image prune -f
           
-          echo "Deployment completed successfully!"
+          echo "Deployment completed!"
           DEPLOY_SCRIPT
 
       - name: Cleanup SSH key
@@ -231,29 +219,18 @@ jobs:
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
         run: |
-          # Wait for nginx to be ready (API already healthy from deployment step)
           sleep 10
-          
-          # Check API health via nginx (port 80)
-          max_retries=6
-          retry_count=0
-          until curl -sf --max-time 10 http://$EC2_HOST/api/health/ > /dev/null 2>&1; do
-            retry_count=$((retry_count + 1))
-            if [ $retry_count -ge $max_retries ]; then
-              echo "Health check failed after $max_retries attempts"
-              echo "=== Fetching container logs for debugging ==="
-              ssh -i ec2_key.pem ec2-user@$EC2_HOST 'docker logs pos-api --tail=100' 2>/dev/null || true
-              echo "=== Nginx logs ==="
-              ssh -i ec2_key.pem ec2-user@$EC2_HOST 'docker logs pos-nginx --tail=50' 2>/dev/null || true
-              echo "=== Container status ==="
-              ssh -i ec2_key.pem ec2-user@$EC2_HOST 'docker ps -a' 2>/dev/null || true
-              exit 1
+          max_retries=5
+          for i in $(seq 1 $max_retries); do
+            if curl -sf --max-time 10 http://$EC2_HOST/api/health/; then
+              echo "Health check passed!"
+              exit 0
             fi
-            echo "Health check attempt $retry_count/$max_retries failed, retrying in 10s..."
+            echo "Attempt $i/$max_retries failed, retrying in 10s..."
             sleep 10
           done
-          
-          echo "Health check passed!"
+          echo "Health check failed"
+          exit 1
 
       - name: Notify on failure
         if: failure()
