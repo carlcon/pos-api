@@ -174,11 +174,11 @@ jobs:
           sleep 15
           
           # Stop old application containers
-          docker-compose -f docker-compose.prod.yml stop api web 2>/dev/null || true
-          docker-compose -f docker-compose.prod.yml rm -f api web 2>/dev/null || true
+          docker-compose -f docker-compose.prod.yml stop api 2>/dev/null || true
+          docker-compose -f docker-compose.prod.yml rm -f api 2>/dev/null || true
           
-          # Start application services
-          docker-compose -f docker-compose.prod.yml up -d api web
+          # Start application services (API only - frontend deployed separately)
+          docker-compose -f docker-compose.prod.yml up -d api
           
           # Wait for api to start
           sleep 10

@@ -71,30 +71,32 @@ services:
           memory: 250M
 
   # =============================================================================
-  # Next.js Frontend
+  # Next.js Frontend - DEPLOYED SEPARATELY from pos-app repo
   # =============================================================================
-  web:
-    image: pos-app:latest
-    container_name: pos-web
-    restart: unless-stopped
-    environment:
-      - NODE_ENV=production
-    depends_on:
-      - api
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    networks:
-      - pos-network
-    ports:
-      - "3000:3000"
-    deploy:
-      resources:
-        limits:
-          memory: 150M
+  # The frontend is deployed via its own workflow in the pos-app repository
+  # See: /opt/pos-frontend/ on EC2
+  # web:
+  #   image: pos-app:latest
+  #   container_name: pos-web
+  #   restart: unless-stopped
+  #   environment:
+  #     - NODE_ENV=production
+  #   depends_on:
+  #     - api
+  #   healthcheck:
+  #     test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 30s
+  #   networks:
+  #     - pos-network
+  #   ports:
+  #     - "3000:3000"
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 150M
 
   # =============================================================================
   # Redis (Celery Broker) - PHASE 2: Uncomment when scaling
