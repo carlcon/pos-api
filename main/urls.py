@@ -18,9 +18,25 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from django.http import JsonResponse
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
+
+# Simple health check view - no database required
+def health_check(request):
+    """Health check endpoint for container orchestration.
+    Returns 200 OK without database queries for fast response.
+    """
+    return JsonResponse({
+        'status': 'healthy',
+        'service': 'pos-api'
+    })
+
+
 urlpatterns = [
+    # Health check endpoint (no auth required, no DB queries)
+    path('api/health/', health_check, name='health-check'),
+    
     path('admin/', admin.site.urls),
     
     # OAuth2

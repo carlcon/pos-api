@@ -202,12 +202,19 @@ jobs:
           echo "Starting API and Nginx services..."
           docker-compose -f docker-compose.prod.yml up -d api nginx
           
-          # Wait for services to stabilize
-          echo "Waiting for services to become healthy..."
+          # Wait briefly then check initial logs
+          echo "Waiting for services to start..."
+          sleep 15
+          
+          # Check API container logs immediately for startup issues
+          echo "=== API Container Logs ==="
+          docker logs pos-api --tail=30 2>&1 || true
+          
+          # Continue waiting for health checks
           sleep 30
           
           # Show container status for debugging
-          echo "Container status:"
+          echo "=== Container Status ==="
           docker-compose -f docker-compose.prod.yml ps
           
           # Clean up old images to save space
@@ -234,8 +241,12 @@ jobs:
             retry_count=$((retry_count + 1))
             if [ $retry_count -ge $max_retries ]; then
               echo "Health check failed after $max_retries attempts"
-              echo "Fetching container logs for debugging..."
-              ssh -i ec2_key.pem ec2-user@$EC2_HOST 'docker-compose -f /opt/pos-app/docker-compose.prod.yml logs --tail=50' 2>/dev/null || true
+              echo "=== Fetching container logs for debugging ==="
+              ssh -i ec2_key.pem ec2-user@$EC2_HOST 'docker logs pos-api --tail=100' 2>/dev/null || true
+              echo "=== Nginx logs ==="
+              ssh -i ec2_key.pem ec2-user@$EC2_HOST 'docker logs pos-nginx --tail=50' 2>/dev/null || true
+              echo "=== Container status ==="
+              ssh -i ec2_key.pem ec2-user@$EC2_HOST 'docker ps -a' 2>/dev/null || true
               exit 1
             fi
             echo "Health check attempt $retry_count/$max_retries failed, retrying in 10s..."
