@@ -180,13 +180,17 @@ jobs:
           docker-compose -f docker-compose.prod.yml stop nginx api 2>/dev/null || true
           docker-compose -f docker-compose.prod.yml rm -f nginx api 2>/dev/null || true
           
-          # Start application services (API + Nginx)
-          docker-compose -f docker-compose.prod.yml up -d api
-          sleep 5
-          docker-compose -f docker-compose.prod.yml up -d nginx
+          # Start application services (API + Nginx together)
+          # Docker Compose handles dependency ordering via depends_on
+          docker-compose -f docker-compose.prod.yml up -d api nginx
           
-          # Wait for api to start
-          sleep 10
+          # Wait for API to become healthy (start_period: 30s + buffer)
+          echo "Waiting for API container to become healthy..."
+          sleep 40
+          
+          # Show container status for debugging
+          echo "Container status:"
+          docker-compose -f docker-compose.prod.yml ps
           
           # Run migrations
           docker-compose -f docker-compose.prod.yml exec -T api python manage.py migrate --noinput
@@ -208,19 +212,21 @@ jobs:
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
         run: |
-          # Wait for services to be ready
-          sleep 30
+          # Wait for nginx to be ready (API already healthy from deployment step)
+          sleep 10
           
           # Check API health via nginx (port 80)
-          max_retries=5
+          max_retries=6
           retry_count=0
           until curl -sf --max-time 10 http://$EC2_HOST/api/health/ > /dev/null 2>&1; do
             retry_count=$((retry_count + 1))
             if [ $retry_count -ge $max_retries ]; then
               echo "Health check failed after $max_retries attempts"
+              echo "Fetching container logs for debugging..."
+              ssh -i ec2_key.pem ec2-user@$EC2_HOST 'docker-compose -f /opt/pos-app/docker-compose.prod.yml logs --tail=50' 2>/dev/null || true
               exit 1
             fi
-            echo "Health check attempt $retry_count failed, retrying in 10s..."
+            echo "Health check attempt $retry_count/$max_retries failed, retrying in 10s..."
             sleep 10
           done
           
