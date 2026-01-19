@@ -174,11 +174,13 @@ jobs:
           sleep 15
           
           # Stop old application containers
-          docker-compose -f docker-compose.prod.yml stop api 2>/dev/null || true
-          docker-compose -f docker-compose.prod.yml rm -f api 2>/dev/null || true
+          docker-compose -f docker-compose.prod.yml stop nginx api 2>/dev/null || true
+          docker-compose -f docker-compose.prod.yml rm -f nginx api 2>/dev/null || true
           
-          # Start application services (API only - frontend deployed separately)
+          # Start application services (API + Nginx)
           docker-compose -f docker-compose.prod.yml up -d api
+          sleep 5
+          docker-compose -f docker-compose.prod.yml up -d nginx
           
           # Wait for api to start
           sleep 10
@@ -206,10 +208,10 @@ jobs:
           # Wait for services to be ready
           sleep 30
           
-          # Check API health with retry logic
+          # Check API health via nginx (port 80)
           max_retries=5
           retry_count=0
-          until curl -sf --max-time 10 http://$EC2_HOST:8000/api/health/ > /dev/null 2>&1; do
+          until curl -sf --max-time 10 http://$EC2_HOST/api/health/ > /dev/null 2>&1; do
             retry_count=$((retry_count + 1))
             if [ $retry_count -ge $max_retries ]; then
               echo "Health check failed after $max_retries attempts"

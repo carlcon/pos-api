@@ -1,6 +1,7 @@
 # POS Application - Production Docker Compose
 # Optimized for AWS EC2 t3.micro (1 vCPU, 1GB RAM)
-# Phase 1: Without Redis/Celery (~600MB total)
+# Phase 1: Without Redis/Celery (~500MB total)
+# Services: PostgreSQL (200M) + API (250M) + Nginx (48M)
 
 version: '3.8'
 
@@ -63,8 +64,7 @@ services:
       start_period: 40s
     networks:
       - pos-network
-    ports:
-      - "8000:8000"
+    # Port 8000 not exposed - nginx proxies internally
     deploy:
       resources:
         limits:
@@ -183,29 +183,32 @@ services:
   #         memory: 100M
 
   # =============================================================================
-  # Nginx - PHASE 2: Uncomment when you have a domain/SSL
+  # Nginx - Reverse Proxy with Security Features
   # =============================================================================
-  # nginx:
-  #   image: nginx:alpine
-  #   container_name: pos-nginx
-  #   restart: unless-stopped
-  #   ports:
-  #     - "80:80"
-  #     - "443:443"
-  #   volumes:
-  #     - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-  #     - ./nginx/ssl:/etc/nginx/ssl:ro
-  #     - static_files:/var/www/static:ro
-  #     - media_files:/var/www/media:ro
-  #   depends_on:
-  #     - api
-  #     - web
-  #   networks:
-  #     - pos-network
-  #   deploy:
-  #     resources:
-  #       limits:
-  #         memory: 48M
+  nginx:
+    image: nginx:alpine
+    container_name: pos-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - static_files:/var/www/static:ro
+      - media_files:/var/www/media:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - pos-network
+    deploy:
+      resources:
+        limits:
+          memory: 48M
 
 # =============================================================================
 # Volumes
