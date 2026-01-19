@@ -229,21 +229,30 @@ EXPORT_FILE_RETENTION_DAYS = 1  # Delete exports older than 1 day
 # =============================================================================
 # These settings are automatically enabled when DEBUG=False
 
+# SSL can be disabled for HTTP-only deployments (e.g., behind load balancer or before domain setup)
+USE_SSL = config('USE_SSL', default=False, cast=bool)
+
 if not DEBUG:
-    # HTTPS/SSL Settings
-    SECURE_SSL_REDIRECT = True
-    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    # HTTPS/SSL Settings - only if SSL is enabled
+    if USE_SSL:
+        SECURE_SSL_REDIRECT = True
+        SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+        
+        # HTTP Strict Transport Security
+        SECURE_HSTS_SECONDS = 31536000  # 1 year
+        SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+        SECURE_HSTS_PRELOAD = True
+        
+        # Cookie Security (only secure cookies over HTTPS)
+        SESSION_COOKIE_SECURE = True
+        CSRF_COOKIE_SECURE = True
+    else:
+        # HTTP mode - no SSL redirect
+        SECURE_SSL_REDIRECT = False
+        SESSION_COOKIE_SECURE = False
+        CSRF_COOKIE_SECURE = False
     
-    # Cookie Security
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
-    
-    # HTTP Strict Transport Security
-    SECURE_HSTS_SECONDS = 31536000  # 1 year
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = True
-    
-    # Additional Security Headers
+    # Additional Security Headers (always enabled in production)
     SECURE_CONTENT_TYPE_NOSNIFF = True
     SECURE_BROWSER_XSS_FILTER = True
     X_FRAME_OPTIONS = 'DENY'

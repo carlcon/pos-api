@@ -140,6 +140,9 @@ jobs:
 
           # Celery disabled for Phase 1 (runs synchronously)
           CELERY_ENABLED=False
+
+          # SSL disabled for HTTP-only deployment (set to True when you add a domain/cert)
+          USE_SSL=False
           EOF
           
           # Remove leading whitespace and copy to EC2
