@@ -138,9 +138,8 @@ jobs:
           CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
           CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS:-http://localhost:3000}
 
-          # Celery Settings
-          CELERY_BROKER_URL=redis://redis:6379/0
-          CELERY_RESULT_BACKEND=django-db
+          # Celery disabled for Phase 1 (runs synchronously)
+          CELERY_ENABLED=False
           EOF
           
           # Remove leading whitespace and copy to EC2
@@ -164,19 +163,22 @@ jobs:
           echo "Building Docker image on EC2..."
           docker build -t pos-api:latest .
           
-          # Start database and redis first
-          docker-compose -f docker-compose.prod.yml up -d db redis
+          # Create network if not exists
+          docker network create pos-network 2>/dev/null || true
+          
+          # Start database first
+          docker-compose -f docker-compose.prod.yml up -d db
           
           # Wait for database to be ready
           echo "Waiting for database to be ready..."
           sleep 15
           
           # Stop old application containers
-          docker-compose -f docker-compose.prod.yml stop api celery celery-beat 2>/dev/null || true
-          docker-compose -f docker-compose.prod.yml rm -f api celery celery-beat 2>/dev/null || true
+          docker-compose -f docker-compose.prod.yml stop api web 2>/dev/null || true
+          docker-compose -f docker-compose.prod.yml rm -f api web 2>/dev/null || true
           
-          # Start application services with new image
-          docker-compose -f docker-compose.prod.yml up -d api celery celery-beat
+          # Start application services
+          docker-compose -f docker-compose.prod.yml up -d api web
           
           # Wait for api to start
           sleep 10
@@ -207,7 +209,7 @@ jobs:
           # Check API health with retry logic
           max_retries=5
           retry_count=0
-          until curl -sf --max-time 10 http://$EC2_HOST/api/health/ > /dev/null 2>&1; do
+          until curl -sf --max-time 10 http://$EC2_HOST:8000/api/health/ > /dev/null 2>&1; do
             retry_count=$((retry_count + 1))
             if [ $retry_count -ge $max_retries ]; then
               echo "Health check failed after $max_retries attempts"

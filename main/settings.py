@@ -199,6 +199,8 @@ SPECTACULAR_SETTINGS = {
 }
 
 # Celery Configuration
+# Set CELERY_ENABLED=True when you have Redis/Celery running (Phase 2+)
+CELERY_ENABLED = config('CELERY_ENABLED', default=False, cast=bool)
 CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
 CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='django-db')
 CELERY_ACCEPT_CONTENT = ['json']
@@ -207,6 +209,7 @@ CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
+CELERY_TASK_ALWAYS_EAGER = not CELERY_ENABLED  # Run tasks synchronously when Celery is disabled
 
 # Email Configuration
 EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
