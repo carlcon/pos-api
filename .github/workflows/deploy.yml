@@ -184,10 +184,12 @@ jobs:
         env:
           DO_HOST: ${{ secrets.DO_HOST }}
         run: |
-          ssh -i do_key.pem root@$DO_HOST 'bash -s' << 'DEPLOY_SCRIPT'
-          set -e  # Exit on any error
+          # Create deployment script on server to avoid heredoc issues
+          ssh -i do_key.pem root@$DO_HOST 'cat > /opt/pos-api/deploy.sh' << 'SCRIPT'
+          #!/bin/bash
           cd /opt/pos-api
-
+          exec > >(tee -a /tmp/deploy.log) 2>&1
+          
           echo "=========================================="
           echo "Step 1: Verify .env file exists"
           echo "=========================================="
@@ -196,60 +198,46 @@ jobs:
             exit 1
           fi
           echo "✅ .env file found"
-          
-          # Show env vars (hide sensitive values)
-          echo "Environment variables loaded:"
           grep -E "^(DB_NAME|DB_USER|DB_HOST|ALLOWED_HOSTS)=" .env || true
 
           echo "=========================================="
           echo "Step 2: Build Docker image"
           echo "=========================================="
-          docker build -t pos-api:latest .
+          docker build -t pos-api:latest . || { echo "Build failed!"; exit 1; }
 
           echo "=========================================="
           echo "Step 3: Stop and clean up old containers"
           echo "=========================================="
-          # Stop all project containers
           docker stop pos-nginx pos-api pos-db 2>/dev/null || true
           docker rm pos-nginx pos-api pos-db 2>/dev/null || true
-          
-          # Remove the old network (might have wrong labels)
           docker network rm pos-network 2>/dev/null || true
-          
           echo "✅ Cleanup complete"
 
           echo "=========================================="
           echo "Step 4: Start database"
           echo "=========================================="
-          # Load DB credentials from .env
-          source .env
+          export $(grep -v '^#' .env | xargs)
           echo "Using DB_USER=$DB_USER, DB_NAME=$DB_NAME"
           
-          # Start only the database service
           docker-compose --env-file .env -f docker-compose.prod.yml up -d db
           
-          # Wait for database with proper health check
           echo "Waiting for database to be ready..."
           for i in $(seq 1 60); do
             if docker exec pos-db pg_isready -U "$DB_USER" -d "$DB_NAME" 2>/dev/null; then
               echo "✅ Database is ready!"
               break
             fi
-            
-            # Check if container is running
             if ! docker ps | grep -q pos-db; then
               echo "ERROR: Database container is not running!"
-              docker logs pos-db --tail 30 2>/dev/null || echo "No logs available"
+              docker logs pos-db --tail 30 2>/dev/null || true
               exit 1
             fi
-            
             echo "Waiting for database... ($i/60)"
             sleep 2
           done
 
-          # Final check
           if ! docker exec pos-db pg_isready -U "$DB_USER" -d "$DB_NAME" 2>/dev/null; then
-            echo "ERROR: Database failed to become ready after 2 minutes"
+            echo "ERROR: Database failed to become ready"
             docker logs pos-db --tail 50
             exit 1
           fi
@@ -257,37 +245,40 @@ jobs:
           echo "=========================================="
           echo "Step 5: Run migrations"
           echo "=========================================="
-          docker-compose --env-file .env -f docker-compose.prod.yml run --rm api python manage.py migrate --noinput
+          docker run --rm --network pos-network \
+            --env-file .env \
+            -e DB_HOST=db \
+            pos-api:latest python manage.py migrate --noinput || { echo "Migrations failed!"; exit 1; }
 
           echo "=========================================="
           echo "Step 6: Collect static files"
           echo "=========================================="
-          docker-compose --env-file .env -f docker-compose.prod.yml run --rm api python manage.py collectstatic --noinput
+          docker run --rm --network pos-network \
+            --env-file .env \
+            -e DB_HOST=db \
+            -v pos-static-files:/app/staticfiles \
+            pos-api:latest python manage.py collectstatic --noinput || { echo "Collectstatic failed!"; exit 1; }
 
           echo "=========================================="
           echo "Step 7: Start API and Nginx"
           echo "=========================================="
           docker-compose --env-file .env -f docker-compose.prod.yml up -d api
           
-          # Wait for API to be healthy before starting Nginx
           echo "Waiting for API to be ready..."
           for i in $(seq 1 30); do
             if docker exec pos-api python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/')" 2>/dev/null; then
               echo "✅ API is ready!"
               break
             fi
-            
             if ! docker ps | grep -q pos-api; then
               echo "ERROR: API container is not running!"
-              docker logs pos-api --tail 50 2>/dev/null || echo "No logs available"
+              docker logs pos-api --tail 50 2>/dev/null || true
               exit 1
             fi
-            
             echo "Waiting for API... ($i/30)"
             sleep 2
           done
 
-          # Start Nginx
           docker-compose --env-file .env -f docker-compose.prod.yml up -d nginx
 
           echo "=========================================="
@@ -299,15 +290,17 @@ jobs:
           echo ""
           echo "Testing health endpoint internally:"
           sleep 5
-          curl -s http://localhost/api/health/ || echo "Health check via nginx failed"
+          curl -sf http://localhost/api/health/ && echo "" || echo "Health check via nginx failed"
 
-          # Clean up old images
           docker image prune -f
 
           echo "=========================================="
           echo "✅ Deployment completed successfully!"
           echo "=========================================="
-          DEPLOY_SCRIPT
+          SCRIPT
+          
+          # Make script executable and run it
+          ssh -i do_key.pem root@$DO_HOST 'chmod +x /opt/pos-api/deploy.sh && /opt/pos-api/deploy.sh'
 
       - name: Cleanup SSH key
         if: always()
