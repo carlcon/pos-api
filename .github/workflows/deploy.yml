@@ -1,6 +1,6 @@
 # POS API - CI/CD Pipeline
-# Builds, tests, and deploys Django API to AWS EC2
-# Build happens directly on EC2 (no ECR required - $0 cost)
+# Builds, tests, and deploys Django API to DigitalOcean Droplet
+# Build happens directly on the Droplet (no registry required - $0 cost)
 
 name: Deploy POS API
 
@@ -19,7 +19,7 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
-    
+
     services:
       postgres:
         image: postgres:15-alpine
@@ -63,38 +63,38 @@ jobs:
           pytest -v --tb=short
 
   # =============================================================================
-  # Job 2: Deploy to EC2 (Build directly on EC2)
+  # Job 2: Deploy to DigitalOcean Droplet (Build directly on Droplet)
   # =============================================================================
   deploy:
-    name: Deploy to EC2
+    name: Deploy to DigitalOcean
     runs-on: ubuntu-latest
     needs: test
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     environment: Production
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Add EC2 to known hosts
+      - name: Add server to known hosts
         env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
+          DO_HOST: ${{ secrets.DO_HOST }}
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts
+          ssh-keyscan -H $DO_HOST >> ~/.ssh/known_hosts
 
       - name: Setup SSH key
         env:
-          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          DO_SSH_KEY: ${{ secrets.DO_SSH_KEY }}
         run: |
-          printf '%s' "$EC2_SSH_KEY" | base64 -d > ec2_key.pem
-          chmod 600 ec2_key.pem
+          printf '%s' "$DO_SSH_KEY" > do_key.pem
+          chmod 600 do_key.pem
 
-      - name: Sync code to EC2
+      - name: Sync code to Droplet
         env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
+          DO_HOST: ${{ secrets.DO_HOST }}
         run: |
-          # Sync code to EC2 (excludes unnecessary files)
+          # Sync code to Droplet (excludes unnecessary files)
           rsync -avz --delete \
             --exclude '.git' \
             --exclude '.github' \
@@ -104,12 +104,12 @@ jobs:
             --exclude 'htmlcov' \
             --exclude '.pytest_cache' \
             --exclude 'logs/*.log' \
-            -e "ssh -i ec2_key.pem" \
-            ./ ec2-user@$EC2_HOST:/opt/pos-app/
+            -e "ssh -i do_key.pem" \
+            ./ root@$DO_HOST:/opt/pos-app/
 
-      - name: Create environment file on EC2
+      - name: Create environment file on Droplet
         env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
+          DO_HOST: ${{ secrets.DO_HOST }}
           SECRET_KEY: ${{ secrets.SECRET_KEY }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_NAME: ${{ secrets.DB_NAME }}
@@ -144,42 +144,42 @@ jobs:
           # SSL disabled for HTTP-only deployment (set to True when you add a domain/cert)
           USE_SSL=False
           EOF
-          
-          # Remove leading whitespace and copy to EC2
+
+          # Remove leading whitespace and copy to Droplet
           sed 's/^          //' /tmp/.env.production > /tmp/.env.clean
-          scp -i ec2_key.pem /tmp/.env.clean ec2-user@$EC2_HOST:/opt/pos-app/.env
+          scp -i do_key.pem /tmp/.env.clean root@$DO_HOST:/opt/pos-app/.env
           rm -f /tmp/.env.production /tmp/.env.clean
 
-      - name: Build and deploy on EC2
+      - name: Build and deploy on Droplet
         env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
+          DO_HOST: ${{ secrets.DO_HOST }}
         run: |
-          ssh -i ec2_key.pem ec2-user@$EC2_HOST 'bash -s' << 'DEPLOY_SCRIPT'
+          ssh -i do_key.pem root@$DO_HOST 'bash -s' << 'DEPLOY_SCRIPT'
           cd /opt/pos-app
-          
+
           # Load environment variables
           set -a
           source .env
           set +a
-          
-          # Build the Docker image directly on EC2
-          echo "Building Docker image on EC2..."
+
+          # Build the Docker image directly on the Droplet
+          echo "Building Docker image on Droplet..."
           docker build -t pos-api:latest .
-          
+
           # Create network if not exists
           docker network create pos-network 2>/dev/null || true
-          
+
           # Start database first
           docker-compose -f docker-compose.prod.yml up -d db
-          
+
           # Wait for database to be ready
           echo "Waiting for database to be ready..."
           sleep 15
-          
+
           # Stop old application containers
           docker-compose -f docker-compose.prod.yml stop nginx api 2>/dev/null || true
           docker-compose -f docker-compose.prod.yml rm -f nginx api 2>/dev/null || true
-          
+
           # Run migrations BEFORE starting the API container
           echo "Running database migrations..."
           docker run --rm \
@@ -188,7 +188,7 @@ jobs:
             -e DB_HOST=db \
             pos-api:latest \
             python manage.py migrate --noinput
-          
+
           # Collect static files
           echo "Collecting static files..."
           docker run --rm \
@@ -197,32 +197,32 @@ jobs:
             -v pos-static-files:/app/staticfiles \
             pos-api:latest \
             python manage.py collectstatic --noinput
-          
+
           # Start API and Nginx
           echo "Starting services..."
           docker-compose -f docker-compose.prod.yml up -d api nginx
-          
+
           # Wait for services to be ready
           sleep 30
-          
+
           # Clean up old images
           docker image prune -f
-          
+
           echo "Deployment completed!"
           DEPLOY_SCRIPT
 
       - name: Cleanup SSH key
         if: always()
-        run: rm -f ec2_key.pem
+        run: rm -f do_key.pem
 
       - name: Health check
         env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
+          DO_HOST: ${{ secrets.DO_HOST }}
         run: |
           sleep 10
           max_retries=5
           for i in $(seq 1 $max_retries); do
-            if curl -sf --max-time 10 http://$EC2_HOST/api/health/; then
+            if curl -sf --max-time 10 http://$DO_HOST/api/health/; then
               echo "Health check passed!"
               exit 0
             fi

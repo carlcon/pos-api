@@ -1,5 +1,5 @@
 # POS Application - Production Docker Compose
-# Optimized for AWS EC2 t3.micro (1 vCPU, 1GB RAM)
+# Optimized for DigitalOcean Droplet (1 vCPU, 1GB RAM)
 # Phase 1: Without Redis/Celery (~500MB total)
 # Services: PostgreSQL (200M) + API (250M) + Nginx (48M)
 
@@ -74,7 +74,7 @@ services:
   # Next.js Frontend - DEPLOYED SEPARATELY from pos-app repo
   # =============================================================================
   # The frontend is deployed via its own workflow in the pos-app repository
-  # See: /opt/pos-frontend/ on EC2
+  # See: /opt/pos-frontend/ on the Droplet
   # web:
   #   image: pos-app:latest
   #   container_name: pos-web
