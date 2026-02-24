@@ -118,6 +118,12 @@ jobs:
           
           echo "✅ Server setup completed"
 
+      - name: Ensure app directory exists
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+        run: |
+          ssh -i do_key.pem root@$DO_HOST 'mkdir -p /opt/pos-api && chown root:root /opt/pos-api'
+
       - name: Sync code to Droplet
         env:
           DO_HOST: ${{ secrets.DO_HOST }}
