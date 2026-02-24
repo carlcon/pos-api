@@ -468,10 +468,11 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f'Created {stock_tx_created} stock transactions'))
 
         # =================================================================
-        # Assign demo user to stores
+        # Assign demo user to default store
         # =================================================================
-        demo_user.assigned_stores.set(stores)
-        self.stdout.write(self.style.SUCCESS(f'Assigned demo user to {len(stores)} stores'))
+        demo_user.assigned_store = stores[0]  # Main store
+        demo_user.save()
+        self.stdout.write(self.style.SUCCESS(f'Assigned demo user to {stores[0].name}'))
 
         # =================================================================
         # Summary
