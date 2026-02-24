@@ -84,11 +84,12 @@ jobs:
           ssh-keyscan -H $DO_HOST >> ~/.ssh/known_hosts
 
       - name: Setup SSH key
-        env:
-          DO_SSH_KEY: ${{ secrets.DO_SSH_KEY }}
         run: |
-          printf '%s' "$DO_SSH_KEY" > do_key.pem
+          echo "${{ secrets.DO_SSH_KEY }}" > do_key.pem
           chmod 600 do_key.pem
+          # Debug: verify key format (first/last line only)
+          head -1 do_key.pem
+          tail -1 do_key.pem
 
       - name: Sync code to Droplet
         env:
