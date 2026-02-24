@@ -128,6 +128,7 @@ jobs:
         env:
           DO_HOST: ${{ secrets.DO_HOST }}
         run: |
+          echo "📦 Syncing code to /opt/pos-api/..."
           # Sync code to Droplet (excludes unnecessary files)
           rsync -avz --delete \
             --exclude '.git' \
@@ -140,6 +141,10 @@ jobs:
             --exclude 'logs/*.log' \
             -e "ssh -i do_key.pem" \
             ./ root@$DO_HOST:/opt/pos-api/
+          
+          # Verify sync worked
+          echo "📂 Verifying files on server..."
+          ssh -i do_key.pem root@$DO_HOST 'ls -la /opt/pos-api/ && echo "✅ Sync verified"'
 
       - name: Create environment file on Droplet
         env:
@@ -200,37 +205,31 @@ jobs:
           echo "Building Docker image on Droplet..."
           docker build -t pos-api:latest .
 
-          # Create network if not exists
-          docker network create pos-network 2>/dev/null || true
+          # Stop old application containers first
+          docker-compose -f docker-compose.prod.yml down 2>/dev/null || true
 
           # Start database first
+          echo "Starting database..."
           docker-compose -f docker-compose.prod.yml up -d db
 
-          # Wait for database to be ready
+          # Wait for database to be healthy
           echo "Waiting for database to be ready..."
-          sleep 15
+          for i in {1..30}; do
+            if docker-compose -f docker-compose.prod.yml exec -T db pg_isready -U ${DB_USER:-pos_user} -d ${DB_NAME:-pos_db} 2>/dev/null; then
+              echo "Database is ready!"
+              break
+            fi
+            echo "Waiting for database... ($i/30)"
+            sleep 2
+          done
 
-          # Stop old application containers
-          docker-compose -f docker-compose.prod.yml stop nginx api 2>/dev/null || true
-          docker-compose -f docker-compose.prod.yml rm -f nginx api 2>/dev/null || true
-
-          # Run migrations BEFORE starting the API container
+          # Run migrations using docker-compose (proper DNS resolution)
           echo "Running database migrations..."
-          docker run --rm \
-            --network pos-network \
-            --env-file /opt/pos-api/.env \
-            -e DB_HOST=db \
-            pos-api:latest \
-            python manage.py migrate --noinput
+          docker-compose -f docker-compose.prod.yml run --rm api python manage.py migrate --noinput
 
           # Collect static files
           echo "Collecting static files..."
-          docker run --rm \
-            --network pos-network \
-            --env-file /opt/pos-api/.env \
-            -v pos-static-files:/app/staticfiles \
-            pos-api:latest \
-            python manage.py collectstatic --noinput
+          docker-compose -f docker-compose.prod.yml run --rm api python manage.py collectstatic --noinput
 
           # Start API and Nginx
           echo "Starting services..."
