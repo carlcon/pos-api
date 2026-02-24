@@ -106,7 +106,7 @@ jobs:
             --exclude '.pytest_cache' \
             --exclude 'logs/*.log' \
             -e "ssh -i do_key.pem" \
-            ./ root@$DO_HOST:/opt/pos-app/
+            ./ root@$DO_HOST:/opt/pos-api/
 
       - name: Create environment file on Droplet
         env:
@@ -148,7 +148,7 @@ jobs:
 
           # Remove leading whitespace and copy to Droplet
           sed 's/^          //' /tmp/.env.production > /tmp/.env.clean
-          scp -i do_key.pem /tmp/.env.clean root@$DO_HOST:/opt/pos-app/.env
+          scp -i do_key.pem /tmp/.env.clean root@$DO_HOST:/opt/pos-api/.env
           rm -f /tmp/.env.production /tmp/.env.clean
 
       - name: Build and deploy on Droplet
@@ -156,7 +156,7 @@ jobs:
           DO_HOST: ${{ secrets.DO_HOST }}
         run: |
           ssh -i do_key.pem root@$DO_HOST 'bash -s' << 'DEPLOY_SCRIPT'
-          cd /opt/pos-app
+          cd /opt/pos-api
 
           # Load environment variables
           set -a
@@ -185,7 +185,7 @@ jobs:
           echo "Running database migrations..."
           docker run --rm \
             --network pos-network \
-            --env-file /opt/pos-app/.env \
+            --env-file /opt/pos-api/.env \
             -e DB_HOST=db \
             pos-api:latest \
             python manage.py migrate --noinput
@@ -194,7 +194,7 @@ jobs:
           echo "Collecting static files..."
           docker run --rm \
             --network pos-network \
-            --env-file /opt/pos-app/.env \
+            --env-file /opt/pos-api/.env \
             -v pos-static-files:/app/staticfiles \
             pos-api:latest \
             python manage.py collectstatic --noinput

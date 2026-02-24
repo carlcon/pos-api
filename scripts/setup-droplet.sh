@@ -115,7 +115,7 @@ log "UFW firewall configured"
 # =============================================================================
 log "Creating application directory..."
 
-APP_DIR="/opt/pos-app"
+APP_DIR="/opt/pos-api"
 sudo mkdir -p $APP_DIR
 sudo chown $USER:$USER $APP_DIR
 
@@ -148,7 +148,7 @@ log "Setting up daily backup cron job..."
 sudo mkdir -p /opt/scripts
 
 # Add cron job for daily backup at 3 AM
-(crontab -l 2>/dev/null | grep -v "backup.sh"; echo "0 3 * * * cd /opt/pos-app && ./scripts/backup.sh >> /var/log/pos-backup.log 2>&1") | crontab -
+(crontab -l 2>/dev/null | grep -v "backup.sh"; echo "0 3 * * * cd /opt/pos-api && ./scripts/backup.sh >> /var/log/pos-backup.log 2>&1") | crontab -
 
 log "Backup cron job configured (runs daily at 3 AM)"
 
@@ -170,7 +170,7 @@ log "=============================================="
 log ""
 log "Next steps:"
 log "1. Log out and log back in for Docker group membership to take effect"
-log "2. Clone your repository to /opt/pos-app"
+log "2. Clone your repository to /opt/pos-api"
 log "3. Create .env.production file with your configuration"
 log "4. Run: docker-compose -f docker-compose.prod.yml up -d"
 log "5. Run: ./scripts/init-letsencrypt.sh <domain> <email>"
