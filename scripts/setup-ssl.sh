@@ -57,23 +57,17 @@ docker-compose -f docker-compose.prod.yml stop nginx || true
 # =============================================================================
 log "Obtaining SSL certificate for $DOMAIN..."
 
+# Extract base domain for email (handles subdomains like api.example.com)
+BASE_DOMAIN=$(echo $DOMAIN | rev | cut -d. -f1,2 | rev)
+
 # Request certificate (standalone mode - certbot runs its own web server)
+# For subdomains (api.example.com), we don't need www
 sudo certbot certonly \
     --standalone \
     --non-interactive \
     --agree-tos \
-    --email admin@${DOMAIN} \
-    --domain ${DOMAIN} \
-    --domain www.${DOMAIN} \
-    || {
-        warn "Failed to get cert for www subdomain, trying just main domain..."
-        sudo certbot certonly \
-            --standalone \
-            --non-interactive \
-            --agree-tos \
-            --email admin@${DOMAIN} \
-            --domain ${DOMAIN}
-    }
+    --email admin@${BASE_DOMAIN} \
+    --domain ${DOMAIN}
 
 log "✅ SSL certificate obtained!"
 
