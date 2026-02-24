@@ -493,7 +493,7 @@ class Command(BaseCommand):
         self.stdout.write(f'  Stock Transactions: {StockTransaction.objects.filter(partner=partner).count()}')
         self.stdout.write('')
         self.stdout.write(self.style.SUCCESS('=' * 60))
-        self.stdout.write(self.style.WARNING(f'  Login at: https://api.jccinventory.com/admin/'))
+        self.stdout.write(self.style.WARNING('  Login at: https://api.jccinventory.com/admin/'))
         self.stdout.write(self.style.WARNING(f'  Username: {username}'))
         self.stdout.write(self.style.WARNING(f'  Password: {password}'))
         self.stdout.write(self.style.SUCCESS('=' * 60))
