@@ -91,6 +91,33 @@ jobs:
           head -1 do_key.pem
           tail -1 do_key.pem
 
+      - name: Check if server needs setup
+        id: check_setup
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+        run: |
+          # Check if Docker is installed (indicates setup was done)
+          if ssh -i do_key.pem root@$DO_HOST 'command -v docker &> /dev/null'; then
+            echo "needs_setup=false" >> $GITHUB_OUTPUT
+            echo "✅ Server already configured"
+          else
+            echo "needs_setup=true" >> $GITHUB_OUTPUT
+            echo "🔧 Server needs initial setup"
+          fi
+
+      - name: Run initial server setup
+        if: steps.check_setup.outputs.needs_setup == 'true'
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+        run: |
+          echo "🚀 Running initial server setup..."
+          
+          # Copy and run setup script
+          scp -i do_key.pem scripts/setup-droplet.sh root@$DO_HOST:/root/setup-droplet.sh
+          ssh -i do_key.pem root@$DO_HOST 'chmod +x /root/setup-droplet.sh && /root/setup-droplet.sh'
+          
+          echo "✅ Server setup completed"
+
       - name: Sync code to Droplet
         env:
           DO_HOST: ${{ secrets.DO_HOST }}
