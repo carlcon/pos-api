@@ -9,7 +9,7 @@ https://docs.djangoproject.com/en/5.2/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
-
+import sys
 from pathlib import Path
 from decouple import config
 
@@ -108,7 +108,6 @@ DATABASES = {
 }
 
 # Use SQLite for testing (in-memory for speed)
-import sys
 if 'test' in sys.argv or 'pytest' in sys.modules:
     DATABASES['default'] = {
         'ENGINE': 'django.db.backends.sqlite3',
