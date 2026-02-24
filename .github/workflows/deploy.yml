@@ -158,6 +158,7 @@ jobs:
           ALLOWED_HOSTS: ${{ secrets.ALLOWED_HOSTS }}
           CORS_ALLOWED_ORIGINS: ${{ secrets.CORS_ALLOWED_ORIGINS }}
           CSRF_TRUSTED_ORIGINS: ${{ secrets.CSRF_TRUSTED_ORIGINS }}
+          DOMAIN: ${{ secrets.DOMAIN }}
         run: |
           # Create .env file directly on the server
           # Note: Don't use quotes around values - they become part of the value
@@ -173,12 +174,39 @@ jobs:
           CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
           CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS:-http://localhost:3000}
           CELERY_ENABLED=False
-          USE_SSL=False
+          DOMAIN=${DOMAIN:-}
           ENVFILE
           
           # Verify .env was created (show non-sensitive vars only)
           echo "✅ .env file created. Contents (sanitized):"
-          ssh -i do_key.pem root@$DO_HOST "grep -E '^(DEBUG|DB_NAME|DB_USER|DB_HOST|ALLOWED_HOSTS|CELERY_ENABLED)=' /opt/pos-api/.env"
+          ssh -i do_key.pem root@$DO_HOST "grep -E '^(DEBUG|DB_NAME|DB_USER|DB_HOST|ALLOWED_HOSTS|CELERY_ENABLED|DOMAIN)=' /opt/pos-api/.env"
+
+      - name: Setup SSL configuration if certs exist
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+          DOMAIN: ${{ secrets.DOMAIN }}
+        run: |
+          if [ -n "$DOMAIN" ]; then
+            echo "🔐 Domain configured: $DOMAIN"
+            
+            # Check if SSL certs exist on server
+            if ssh -i do_key.pem root@$DO_HOST "test -f /opt/pos-api/certs/fullchain.pem"; then
+              echo "✅ SSL certificates found, using SSL nginx config"
+              
+              # Copy SSL config and replace domain placeholder
+              ssh -i do_key.pem root@$DO_HOST "
+                cp /opt/pos-api/nginx/nginx-ssl.conf /opt/pos-api/nginx/nginx.conf
+                sed -i 's/YOUR_DOMAIN/${DOMAIN}/g' /opt/pos-api/nginx/nginx.conf
+                echo '✅ SSL nginx config activated for ${DOMAIN}'
+              "
+            else
+              echo "⚠️ SSL certificates not found at /opt/pos-api/certs/"
+              echo "   Run setup-ssl.sh on the server to obtain certificates"
+              echo "   Using HTTP-only nginx config"
+            fi
+          else
+            echo "ℹ️ No DOMAIN secret configured, using HTTP-only nginx config"
+          fi
 
       - name: Build and deploy on Droplet
         env:
@@ -309,11 +337,22 @@ jobs:
       - name: Health check
         env:
           DO_HOST: ${{ secrets.DO_HOST }}
+          DOMAIN: ${{ secrets.DOMAIN }}
         run: |
           sleep 10
           max_retries=5
+          
+          # Use HTTPS if domain is configured, otherwise use HTTP with IP
+          if [ -n "$DOMAIN" ]; then
+            HEALTH_URL="https://${DOMAIN}/api/health/"
+            echo "Checking health via HTTPS: $HEALTH_URL"
+          else
+            HEALTH_URL="http://${DO_HOST}/api/health/"
+            echo "Checking health via HTTP: $HEALTH_URL"
+          fi
+          
           for i in $(seq 1 $max_retries); do
-            if curl -sf --max-time 10 http://$DO_HOST/api/health/; then
+            if curl -sf --max-time 10 "$HEALTH_URL"; then
               echo "Health check passed!"
               exit 0
             fi
